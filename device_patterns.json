@@ -1,0 +1,62 @@
+{
+  "manufacturers": {
+    "samsung": {
+      "brand": "samsung",
+      "manufacturer": "samsung",
+      "models": [
+        {
+          "product": "dm3qxeea",
+          "device": "dm3q",
+          "model": "SM-S908B",
+          "board": "dm3q",
+          "display_name": "Galaxy S22 Ultra",
+          "hardware": "qcom"
+        }
+      ],
+      "build_id_patterns": {
+        "13": [
+          "TP1A",
+          "TQ1A"
+        ]
+      },
+      "serial_pattern": "R{8}",
+      "serial_chars": "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+    },
+    "google": {
+      "brand": "google",
+      "manufacturer": "Google",
+      "models": [
+        {
+          "product": "husky",
+          "device": "husky",
+          "model": "Pixel 8 Pro",
+          "board": "husky",
+          "display_name": "Pixel 8 Pro",
+          "hardware": "husky"
+        }
+      ],
+      "build_id_patterns": {
+        "13": [
+          "TQ3A",
+          "TP1A"
+        ]
+      },
+      "serial_pattern": "{14}",
+      "serial_chars": "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+    }
+  },
+  "android_versions": {
+    "11": "11",
+    "12": "12",
+    "13": "13",
+    "14": "14",
+    "15": "15"
+  },
+  "build_fingerprint_format": "{brand}/{product}/{device}:{android_version}/{build_id}/{incremental}:user/release-keys",
+  "props_to_spoof": [
+    "ro.build.fingerprint",
+    "ro.product.model"
+  ],
+  "common_build_tags": "release-keys",
+  "common_build_type": "user"
+}
