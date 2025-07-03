@@ -116,7 +116,7 @@ class DeviceSpoofingManager:
         config = configparser.ConfigParser()
         config.add_section("UNIQUENESS")
         config.set("UNIQUENESS", "enable_uniqueness_features", "true")
-        config.set("UNIQUENESS", "cleanup_user_profile_after_session", "true")
+        config.set("UNIQUENESS", "cleanup_user_profile_after_session", "false")
         config.set("UNIQUENESS", "auto_set_random_android_id", "true")
         config.set("UNIQUENESS", "user_creation_retries", "3")
         config.set("UNIQUENESS", "validate_user_switch", "true")
@@ -138,6 +138,8 @@ class DeviceSpoofingManager:
         config.set("ADVANCED_SPOOFING", "spoof_serial_number", "true")
         config.set("ADVANCED_SPOOFING", "spoof_device_model", "true")
         config.set("ADVANCED_SPOOFING", "spoof_android_version_props", "true")
+        config.set("ADVANCED_SPOOFING", "restore_properties_after_session", "false")
+        config.set("ADVANCED_SPOOFING", "restore_user_limits_after_session", "false")
 
         config.add_section("SPOOF_VALIDATION")
         config.set("SPOOF_VALIDATION", "min_storage_mb", "500")
@@ -2139,41 +2141,192 @@ class DeviceSpoofingManager:
             )
         return all_set_success
 
-    def comprehensive_cleanup(self, device_id):
-        """Performs a full cleanup of spoofed users and properties for a device."""
+    def _prompt_user_for_cleanup_options(self, device_id, console=None):
+        """Prompts user for cleanup options instead of automatic restoration."""
+        if not console and not QUESTIONARY_AVAILABLE:
+            # Fallback to basic input if no console or questionary
+            print(f"\n🧹 Cleanup options for {device_id}:")
+            user_choice = input("Restore user profiles? (y/n, default n): ").strip().lower() or "n"
+            restore_users = user_choice in ["y", "yes"]
+            
+            props_choice = input("Restore original device properties? (y/n, default n): ").strip().lower() or "n"
+            restore_props = props_choice in ["y", "yes"]
+            
+            limits_choice = input("Restore original user limits? (y/n, default n): ").strip().lower() or "n"
+            restore_limits = limits_choice in ["y", "yes"]
+            
+            return restore_users, restore_props, restore_limits
+        
+        # Rich/questionary interface
+        if console:
+            console.print(f"\n🧹 Cleanup Options for {device_id}", style="bold cyan")
+            console.print("Choose what to restore (changes will be kept if not restored):", style="dim")
+        
+        try:
+            # Check what can be restored
+            has_user_profiles = device_id in self.active_spoofed_users
+            has_property_backups = (device_id in self.property_backups and 
+                                  self.property_backups[device_id])
+            has_user_limits = device_id in self.user_limit_originals
+            
+            cleanup_choices = []
+            
+            if has_user_profiles:
+                cleanup_choices.append(
+                    questionary.Choice(
+                        f"Remove created user profiles (current: {self.active_spoofed_users[device_id].get('user_name', 'Unknown')})",
+                        "users"
+                    )
+                )
+            
+            if has_property_backups:
+                prop_count = len(self.property_backups[device_id])
+                cleanup_choices.append(
+                    questionary.Choice(
+                        f"Restore original device properties ({prop_count} properties modified)",
+                        "properties"
+                    )
+                )
+            
+            if has_user_limits:
+                original_limit = self.user_limit_originals[device_id]
+                cleanup_choices.append(
+                    questionary.Choice(
+                        f"Restore original user limit (currently modified, original: {original_limit})",
+                        "limits"
+                    )
+                )
+            
+            if not cleanup_choices:
+                if console:
+                    console.print("No modifications detected for this device.", style="dim")
+                return False, False, False
+            
+            cleanup_choices.append(questionary.Choice("Keep all changes (no restoration)", "none"))
+            
+            selected_cleanups = questionary.checkbox(
+                "Select what to restore:",
+                choices=cleanup_choices,
+                style=questionary.Style([
+                    ('pointer', 'fg:yellow bold'),
+                    ('highlighted', 'fg:yellow'),
+                    ('selected', 'fg:cyan bold'),
+                    ('checkbox', 'fg:cyan'),
+                    ('checkbox-selected', 'fg:cyan bold')
+                ])
+            ).ask()
+            
+            if selected_cleanups is None:  # User cancelled
+                return False, False, False
+            
+            if "none" in selected_cleanups:
+                return False, False, False
+                
+            restore_users = "users" in selected_cleanups
+            restore_props = "properties" in selected_cleanups
+            restore_limits = "limits" in selected_cleanups
+            
+            return restore_users, restore_props, restore_limits
+            
+        except KeyboardInterrupt:
+            if console:
+                console.print("\nCleanup cancelled - keeping all changes.", style="yellow")
+            return False, False, False
+
+    def comprehensive_cleanup(self, device_id, prompt_user=True):
+        """Performs cleanup of spoofed users and properties for a device with user choice."""
         self._log_message(
-            f"🧹 Performing comprehensive cleanup for {device_id}...", "info"
+            f"🧹 Cleanup options for {device_id}...", "info"
         )
-        user_cleaned = True
-        if self.config.getboolean(
-            "UNIQUENESS", "cleanup_user_profile_after_session", fallback=True
-        ):
-            user_cleaned = self.cleanup_user_profile(
-                device_id
-            )  # This also handles active_spoofed_users
-        else:
+        
+        # Check if there's anything to clean up
+        has_modifications = (
+            device_id in self.active_spoofed_users or
+            (device_id in self.property_backups and self.property_backups[device_id]) or
+            device_id in self.user_limit_originals
+        )
+        
+        if not has_modifications:
             self._log_message(
-                f"  Skipping user profile cleanup for {device_id} (disabled in config).",
-                "debug",
-                dim_style=True,
+                f"  No modifications detected for {device_id}. Skipping cleanup.",
+                "info",
+                dim_style=True
             )
-
-        props_restored = self.restore_all_properties(device_id)
-
+            return True
+        
+        # Get user preferences for cleanup
+        if prompt_user:
+            restore_users, restore_props, restore_limits = self._prompt_user_for_cleanup_options(
+                device_id, self.console
+            )
+        else:
+            # Use config defaults when not prompting (for backwards compatibility)
+            restore_users = self.config.getboolean(
+                "UNIQUENESS", "cleanup_user_profile_after_session", fallback=False
+            )
+            restore_props = self.config.getboolean(
+                "ADVANCED_SPOOFING", "restore_properties_after_session", fallback=False
+            )
+            restore_limits = self.config.getboolean(
+                "ADVANCED_SPOOFING", "restore_user_limits_after_session", fallback=False
+            )
+        
+        # Perform selected cleanup actions
+        user_cleaned = True
+        if restore_users:
+            user_cleaned = self.cleanup_user_profile(device_id)
+        else:
+            if device_id in self.active_spoofed_users:
+                user_data = self.active_spoofed_users[device_id]
+                self._log_message(
+                    f"  Keeping user profile '{user_data.get('user_name', 'Unknown')}' (ID: {user_data.get('user_id')}) as requested.",
+                    "info",
+                    dim_style=True
+                )
+        
+        props_restored = True
+        if restore_props:
+            props_restored = self.restore_all_properties(device_id)
+        else:
+            if device_id in self.property_backups and self.property_backups[device_id]:
+                prop_count = len(self.property_backups[device_id])
+                self._log_message(
+                    f"  Keeping {prop_count} modified device properties as requested.",
+                    "info",
+                    dim_style=True
+                )
+        
         limit_restored = True
-        if self.config.getboolean(
-            "ADVANCED_SPOOFING", "bypass_user_limits", fallback=False
-        ):  # Only restore if bypass was active
+        if restore_limits and self.config.getboolean("ADVANCED_SPOOFING", "bypass_user_limits", fallback=False):
             limit_restored = self.restore_user_limit(device_id)
+        else:
+            if device_id in self.user_limit_originals:
+                self._log_message(
+                    f"  Keeping modified user limits as requested.",
+                    "info",
+                    dim_style=True
+                )
 
         final_success = user_cleaned and props_restored and limit_restored
         if final_success:
-            self._log_message(
-                f"  ✓ Comprehensive cleanup successful for {device_id}.", "success"
-            )
+            action_summary = []
+            if restore_users: action_summary.append("users")
+            if restore_props: action_summary.append("properties") 
+            if restore_limits: action_summary.append("limits")
+            
+            if action_summary:
+                self._log_message(
+                    f"  ✓ Cleanup completed for {device_id} (restored: {', '.join(action_summary)}).", 
+                    "success"
+                )
+            else:
+                self._log_message(
+                    f"  ✓ All changes kept for {device_id} as requested.", 
+                    "success"
+                )
         else:
             self._log_message(
-                f"  ✗ Comprehensive cleanup had issues for {device_id} (User: {user_cleaned}, Props: {props_restored}, Limit: {limit_restored}).",
+                f"  ✗ Some cleanup operations had issues for {device_id}.",
                 "warning",
             )
         return final_success
@@ -2984,7 +3137,7 @@ class InteractiveAPKInstaller:
                 },
                 "UNIQUENESS": {
                     "enable_uniqueness_features": "false",
-                    "cleanup_user_profile_after_session": "true",
+                    "cleanup_user_profile_after_session": "false",
                     "auto_switch_back_to_owner": "true",
                     "auto_set_random_android_id": "true",
                     "user_creation_retries": "3",
@@ -3185,7 +3338,7 @@ class InteractiveAPKInstaller:
             },
             "UNIQUENESS": {
                 "enable_uniqueness_features": "false",
-                "cleanup_user_profile_after_session": "true",
+                "cleanup_user_profile_after_session": "false",
                 "auto_switch_back_to_owner": "true",
                 "auto_set_random_android_id": "true",
                 "user_creation_retries": "3",
@@ -3299,7 +3452,7 @@ package_parser = pyaxmlparser
 # enable_uniqueness_features: Master toggle for creating isolated Android user profiles for installs.
 enable_uniqueness_features = false
 # cleanup_user_profile_after_session: Removes created user profiles after installation session for that device.
-cleanup_user_profile_after_session = true
+cleanup_user_profile_after_session = false
 # auto_switch_back_to_owner: Switches to primary user (0) before cleaning up a temporary user.
 auto_switch_back_to_owner = true
 # auto_set_random_android_id: Sets a random Android ID for newly created user profiles (requires Root).
@@ -3653,7 +3806,7 @@ validate_root_access = true
                 # Show instructions for better UX
                 if self.console:
                     self.console.print(
-                        "💡 [dim]Use arrow keys to navigate, <space> to select/deselect, <a> to select all, <i> to invert, <enter> to confirm[/dim]",
+                        "💡 Use arrow keys to navigate, [space] to select/deselect, [a] to select all, [i] to invert, [enter] to confirm",
                         style="dim"
                     )
                 
@@ -3682,12 +3835,12 @@ validate_root_access = true
                     # Give user clear guidance on what to do
                     if self.console:
                         self.console.print(
-                            f"[yellow]⚠️ No {item_type_name_plural.lower()} selected![/yellow] "
-                            f"[dim]Use <space> to select items, then <enter> to confirm.[/dim]"
+                            f"⚠️ No {item_type_name_plural.lower()} selected! Use [space] to select items, then [enter] to confirm.",
+                            style="yellow"
                         )
                     
                     if not Confirm.ask(
-                        Text.from_markup(f"[yellow]Continue with no {item_type_name_plural.lower()} selected?[/yellow]"),
+                        f"Continue with no {item_type_name_plural.lower()} selected?",
                         default=False,
                         console=self.console
                     ):
@@ -3720,7 +3873,7 @@ validate_root_access = true
             # Show instructions for better UX
             if self.console:
                 self.console.print(
-                    "💡 [dim]Use arrow keys to navigate, <enter> to select highlighted item[/dim]",
+                    "💡 Use arrow keys to navigate, [enter] to select highlighted item",
                     style="dim"
                 )
             
@@ -3787,7 +3940,12 @@ validate_root_access = true
                 active_modes_list.append("[cyan]Magisk Property Spoofing[/cyan]")
             
             if active_modes_list:
-                self.console.print(Text.from_markup(f"ℹ️ Active Mode(s): {', '.join(active_modes_list)}"))
+                # Clean the markup for display - remove Rich tags for cleaner output
+                clean_modes = []
+                for mode in active_modes_list:
+                    clean_mode = mode.replace("[cyan]", "").replace("[/cyan]", "")
+                    clean_modes.append(clean_mode)
+                self.console.print(f"ℹ️ Active Mode(s): {', '.join(clean_modes)}", style="cyan")
 
         print_additional_device_info()
         
@@ -3802,7 +3960,7 @@ validate_root_access = true
             # Multiple devices - ask user preference
             if self.console:
                 self.console.print(
-                    "💡 [dim]Choose selection mode: [s]ingle device or [m]ultiple devices (default: single)[/dim]",
+                    "💡 Choose selection mode: single device or multiple devices (default: single)",
                     style="dim"
                 )
             
@@ -3813,7 +3971,14 @@ validate_root_access = true
                         questionary.Choice("Single device (navigate with arrows, press Enter)", "single"),
                         questionary.Choice("Multiple devices (use spacebar to select, press Enter)", "multi")
                     ],
-                    default="single"
+                    default="single",
+                    style=questionary.Style([
+                        ('question', 'bold'),
+                        ('pointer', 'fg:yellow bold'),
+                        ('highlighted', 'fg:yellow'),
+                        ('selected', 'fg:cyan bold'),
+                        ('answer', 'fg:cyan bold')
+                    ])
                 ).ask()
                 
                 if mode_choice is None:  # User pressed Ctrl+C
@@ -3914,9 +4079,8 @@ validate_root_access = true
         def print_additional_apk_info():
             if self.console:
                 self.console.print(
-                    Text.from_markup(
-                        "💡 [dim]Note: XAPK, APKM, and ZIP files will be processed for base, split APKs, and OBB files if present.[/dim]"
-                    )
+                    "💡 Note: XAPK, APKM, and ZIP files will be processed for base, split APKs, and OBB files if present.",
+                    style="dim"
                 )
 
         # Display list of found files *before* the interactive prompt
@@ -3927,8 +4091,8 @@ validate_root_access = true
                  elif f_data["type"] == "APKM": color_style = "bright_magenta"
                  elif f_data["type"] == "ZIP": color_style = "yellow"
                  else: color_style = "cyan"
-                 text_markup = f"  • [{color_style}]{f_data['type']:<4}[/{color_style}] {f_data['name']} ([dim]{f_data['size']:.1f} MB[/dim])"
-                 self.console.print(Text.from_markup(text_markup))
+                 # Use direct styling instead of markup to avoid display issues
+                 self.console.print(f"  • {f_data['type']:<4} {f_data['name']} ({f_data['size']:.1f} MB)", style=color_style)
 
         print_additional_apk_info()
         
@@ -3943,7 +4107,7 @@ validate_root_access = true
             # Multiple files - ask user preference
             if self.console:
                 self.console.print(
-                    "💡 [dim]Choose selection mode: [s]ingle file or [m]ultiple files (default: single)[/dim]",
+                    "💡 Choose selection mode: single file or multiple files (default: single)",
                     style="dim"
                 )
             
@@ -3954,7 +4118,14 @@ validate_root_access = true
                         questionary.Choice("Single file (navigate with arrows, press Enter)", "single"),
                         questionary.Choice("Multiple files (use spacebar to select, press Enter)", "multi")
                     ],
-                    default="single"
+                    default="single",
+                    style=questionary.Style([
+                        ('question', 'bold'),
+                        ('pointer', 'fg:yellow bold'),
+                        ('highlighted', 'fg:yellow'),
+                        ('selected', 'fg:cyan bold'),
+                        ('answer', 'fg:cyan bold')
+                    ])
                 ).ask()
                 
                 if mode_choice is None:  # User pressed Ctrl+C
@@ -4001,8 +4172,8 @@ validate_root_access = true
                 color_style = "yellow"  # Yellow for ZIP files
             else:  # APK
                 color_style = "cyan"
-            text_markup = f"  • [{color_style}]{f_data['type']:<4}[/{color_style}] {f_data['name']} ([dim]{f_data['size']:.1f} MB[/dim])"
-            self.console.print(Text.from_markup(text_markup))
+            # Use direct styling instead of markup to avoid display issues
+            self.console.print(f"  • {f_data['type']:<4} {f_data['name']} ({f_data['size']:.1f} MB)", style=color_style)
 
         total_install_ops = len(selected_devices_list) * len(selected_files_list)
         self.console.print(
@@ -4030,19 +4201,15 @@ validate_root_access = true
 
         if active_spoof_modes_display:
             self.console.print(
-                Text.from_markup(
-                    f"\n[bold yellow]⚠️ Active Spoofing Mode(s): {', '.join(active_spoof_modes_display)}[/bold yellow]"
-                ),
-                style="yellow",
+                f"\n⚠️ Active Spoofing Mode(s): {', '.join(active_spoof_modes_display)}",
+                style="bold yellow",
                 highlight=False,
             )
 
         # Confirmation prompt
         if self.console:
             return Confirm.ask(
-                Text.from_markup(
-                    "\n[bold green]Proceed with installation(s)?[/bold green]"
-                ),
+                "\nProceed with installation(s)?",
                 default=True,
                 console=self.console,
             )
@@ -5933,7 +6100,8 @@ validate_root_access = true
                     )
                     for dev_id_cleanup_iter in active_users_to_clean:
                         # Comprehensive cleanup also restores properties and user limits if bypass was used
-                        self.spoofing_manager.comprehensive_cleanup(dev_id_cleanup_iter)
+                        # Don't prompt user for previous iteration cleanup - use config defaults
+                        self.spoofing_manager.comprehensive_cleanup(dev_id_cleanup_iter, prompt_user=False)
 
             self.cleanup_temp_files()  # Clean temp files from previous run/iteration
             self.print_banner()
@@ -6060,7 +6228,8 @@ validate_root_access = true
             )  # Include all scanned devices too
 
             for dev_id_final_clean in all_devices_potentially_affected:
-                self.spoofing_manager.comprehensive_cleanup(dev_id_final_clean)
+                # Prompt user for final cleanup - let them choose what to restore
+                self.spoofing_manager.comprehensive_cleanup(dev_id_final_clean, prompt_user=True)
 
         self.cleanup_temp_files()  # Final temp file cleanup
         return overall_success_status  # True if at least one install session had some success
@@ -6163,8 +6332,9 @@ def main():
             )  # From all scanned devices
 
             for dev_id_ultimate_cleanup in all_devices_final_pass:
+                # Emergency cleanup - don't prompt user during exception handling
                 installer_instance.spoofing_manager.comprehensive_cleanup(
-                    dev_id_ultimate_cleanup
+                    dev_id_ultimate_cleanup, prompt_user=False
                 )
 
         installer_instance.cleanup_temp_files()
