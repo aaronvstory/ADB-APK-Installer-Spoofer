@@ -1,0 +1,8 @@
+# Core dependencies for ADB APK Installer & Spoofer
+rich>=13.0.0
+questionary>=2.0.0
+pyaxmlparser>=0.3.0
+
+# Optional dependencies for enhanced functionality
+# colorama>=0.4.0  # For Windows color support (usually included with rich)
+# typing-extensions>=4.0.0  # For older Python versions 
