@@ -188,8 +188,11 @@ extracted_*/
 *.apk
 *.xapk
 *.apkm
-# Keep ZIP files as they might contain other project files
-# *.zip
+*.zip
+
+# Specific large files that should never be committed
+apks/com.current.app_7.31.0-_apkmirror.com.zip
+otherAPKs/*.xapk
 
 # Configuration backups
 config.ini.bak
