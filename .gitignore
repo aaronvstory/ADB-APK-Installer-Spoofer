@@ -184,15 +184,17 @@ temp_*/
 extracted_*/
 *.log
 
-# APK files - excluded to reduce repository size
+# APK files and folders - excluded to reduce repository size
 *.apk
 *.xapk
 *.apkm
 *.zip
 
-# Specific large files that should never be committed
-apks/com.current.app_7.31.0-_apkmirror.com.zip
-otherAPKs/*.xapk
+# APK directories - exclude all contents but keep structure
+apks/*
+!apks/.gitkeep
+otherAPKs/*
+!otherAPKs/.gitkeep
 
 # Configuration backups
 config.ini.bak
