@@ -91,6 +91,70 @@ class DeviceSpoofingManager:
         "ro.miui.ui.version.code",  # For Xiaomi devices
     ]
 
+    # Additional properties for comprehensive anti-tracking (used with auto-spoof on user profile creation)
+    ANTI_TRACKING_EXTENDED_PROPS = [
+        # Hardware/system identifiers commonly used for tracking
+        "ro.hardware",
+        "ro.hardware.chipname", 
+        "ro.hardware.platform",
+        "ro.board.platform",
+        "ro.chipname",
+        "ro.arch",
+        "ro.product.cpu.abi",
+        "ro.product.cpu.abilist",
+        "ro.product.cpu.abilist32",
+        "ro.product.cpu.abilist64",
+        # Boot/firmware identifiers
+        "ro.bootloader",
+        "ro.boot.bootloader",
+        "ro.boot.hardware",
+        "ro.boot.revision",
+        "ro.boot.baseband",
+        "ro.baseband",
+        # Vendor/OEM specific
+        "ro.vendor.product.cpu.abilist",
+        "ro.vendor.build.date",
+        "ro.vendor.build.id",
+        "ro.vendor.build.type",
+        "ro.oem.*",  # Wildcard for OEM properties
+        # Security/DRM identifiers  
+        "ro.hardware.keystore",
+        "ro.hardware.gatekeeper",
+        "ro.crypto.type",
+        "ro.crypto.state",
+        # Additional build properties
+        "ro.build.flavor",
+        "ro.build.product",
+        "ro.build.brand",
+        "ro.build.device",
+        "ro.build.board",
+        "ro.build.version.base_os",
+        "ro.build.version.security_patch",
+        "ro.build.version.min_supported_target_sdk",
+        # System service identifiers
+        "ro.config.alarm_alert",
+        "ro.config.notification_sound", 
+        "ro.config.ringtone",
+        # Network/connectivity properties
+        "ro.telephony.call_ring.multiple",
+        "ro.telephony.default_network",
+        "ro.telephony.ril.config",
+        "wifi.interface",
+        "ro.wifi.channels",
+        # Display/UI properties
+        "ro.sf.lcd_density",
+        "ro.config.density_split",
+        "ro.config.small_battery",
+        # Regional/locale identifiers
+        "ro.product.locale.language",
+        "ro.product.locale.region", 
+        "ro.config.locales",
+        # Vendor fingerprints and additional build props
+        "ro.vendor.build.fingerprint",
+        "ro.system_ext.build.fingerprint",
+        "ro.product_services.build.fingerprint",
+    ]
+
     def __init__(self, adb_path="adb", console=None, config=None):
         self.adb_path = adb_path
         self.console = console if console and RICH_AVAILABLE else None
@@ -138,6 +202,7 @@ class DeviceSpoofingManager:
         config.set("ADVANCED_SPOOFING", "spoof_serial_number", "true")
         config.set("ADVANCED_SPOOFING", "spoof_device_model", "true")
         config.set("ADVANCED_SPOOFING", "spoof_android_version_props", "true")
+        config.set("ADVANCED_SPOOFING", "auto_spoof_on_user_creation", "true")
         config.set("ADVANCED_SPOOFING", "restore_properties_after_session", "false")
         config.set("ADVANCED_SPOOFING", "restore_user_limits_after_session", "false")
 
@@ -428,7 +493,8 @@ class DeviceSpoofingManager:
             "debug": "dim blue",
         }
         style = style_map.get(level, "")
-        self.console.print(Text(message, style=style))
+        # Enable markup parsing for rich formatting like [b]...[/b]
+        self.console.print(message, style=style, markup=True)
 
     def _generate_random_hex_string(self, length, uppercase=False):
         hex_chars = "0123456789ABCDEF" if uppercase else "0123456789abcdef"
@@ -485,39 +551,109 @@ class DeviceSpoofingManager:
         # Ensure value is properly quoted for the shell command passed to su -c
         # `value` itself might contain quotes or special characters.
         # The _run_adb_shell_command handles quoting for `su -c` if `command_list_or_str` is a list.
-        command_list = ["resetprop", property_name, str(value)]
-
-        result = self._run_adb_shell_command(device_id, command_list, as_root=True)
-        if result.returncode == 0:
-            # Some resetprop versions don't output anything on success
-            # We can verify by trying to read the prop back
-            time.sleep(0.1)  # Brief pause for property service to catch up
-            newly_set_value = self.get_current_property_value(device_id, property_name)
-            if newly_set_value == str(value):
-                self._log_message(
-                    f"  ✓ Set {property_name} to: '{value}' (Verified)", "success"
-                )
-                return True
+        
+        # Try multiple resetprop strategies for stubborn properties
+        strategies = [
+            ["resetprop", property_name, str(value)],  # Standard approach
+            ["resetprop", "-n", property_name, str(value)],  # Non-persistent (runtime only)
+            ["resetprop", "--force", property_name, str(value)],  # Force setting (if supported)
+        ]
+        
+        for strategy_idx, command_list in enumerate(strategies):
+            strategy_name = ["Standard", "Non-persistent", "Force"][strategy_idx]
+            
+            result = self._run_adb_shell_command(device_id, command_list, as_root=True)
+            if result.returncode == 0:
+                # Some resetprop versions don't output anything on success
+                # We can verify by trying to read the prop back
+                time.sleep(0.2)  # Brief pause for property service to catch up
+                newly_set_value = self.get_current_property_value(device_id, property_name)
+                if newly_set_value == str(value):
+                    self._log_message(
+                        f"  ✓ Set {property_name} to: '{value}' (Verified, {strategy_name})", "success"
+                    )
+                    return True
+                else:
+                    self._log_message(
+                        f"  ⚠️ Set {property_name} to: '{value}' (Command OK with {strategy_name}, but verification failed. Got: '{newly_set_value}')",
+                        "warning",
+                    )
+                    # Continue to next strategy if verification failed
+                    continue
             else:
+                # Check if this is a "help text" error (common with invalid flags)
+                error_output = result.stderr.strip() or result.stdout.strip()
+                if "resetprop" in error_output and ("usage" in error_output.lower() or "options:" in error_output.lower()):
+                    # This strategy's flags aren't supported, try next
+                    if strategy_idx < len(strategies) - 1:
+                        continue
+                
+                # Log detailed error for debugging
                 self._log_message(
-                    f"  ⚠️ Set {property_name} to: '{value}' (Command OK, but verification failed. Got: '{newly_set_value}')",
-                    "warning",
+                    f"  ⚠️ {strategy_name} strategy failed for {property_name}: {error_output.splitlines()[0] if error_output else 'No output'}",
+                    "debug",
+                    dim_style=True
                 )
-                # Still return True as command was successful, but warn. Some props might not reflect immediately or be overridden.
-                return True
-        else:
-            error_msg = (
-                result.stderr.strip()
-                or result.stdout.strip()
-                or "Unknown error from resetprop"
-            ).splitlines()[0]
-            self._log_message(
-                f"  ✗ Failed to set {property_name} (value: '{value}'): {error_msg}",
-                "error",
-            )
-            # For debugging, show the exact command parts if it was complex:
-            # self._log_message(f"    Command list: {command_list}", "debug", dim_style=True)
+                
+                # Continue to next strategy unless this was the last one
+                if strategy_idx < len(strategies) - 1:
+                    continue
+        
+        # All strategies failed
+        self._log_message(
+            f"  ✗ Failed to set {property_name} (value: '{value}') with all strategies",
+            "error",
+        )
+        
+        # Check if property is read-only
+        self._check_property_readonly_status(device_id, property_name)
         return False
+
+    def _check_property_readonly_status(self, device_id, property_name):
+        """Check and provide feedback about why a property might be read-only"""
+        # Common read-only or problematic properties
+        readonly_properties = {
+            "ro.product.model": "Hardware/bootloader enforced - may require custom ROM or kernel modification",
+            "ro.product.device": "Hardware/bootloader enforced - typically unchangeable",
+            "ro.product.board": "Hardware/bootloader enforced - typically unchangeable", 
+            "ro.hardware": "Hardware identifier - typically unchangeable",
+            "ro.bootloader": "Bootloader version - typically unchangeable",
+            "ro.boot.bootloader": "Bootloader version - typically unchangeable",
+            "ro.product.cpu.abi": "Hardware ABI - typically unchangeable",
+            "ro.product.cpu.abilist": "Hardware ABI list - typically unchangeable"
+        }
+        
+        if property_name in readonly_properties:
+            self._log_message(
+                f"    💡 Note: {property_name} is typically read-only. {readonly_properties[property_name]}",
+                "info",
+                dim_style=True
+            )
+        elif property_name.startswith("ro."):
+            self._log_message(
+                f"    💡 Note: {property_name} is a read-only property (ro.*) and may be protected by SELinux policies",
+                "info", 
+                dim_style=True
+            )
+        
+        # Check SELinux status as it can affect property setting
+        selinux_result = self._run_adb_shell_command(device_id, ["getenforce"], timeout=5)
+        if selinux_result.returncode == 0:
+            selinux_status = selinux_result.stdout.strip()
+            if selinux_status.lower() == "enforcing":
+                self._log_message(
+                                         f"    💡 SELinux is [bold yellow]Enforcing[/bold yellow] - this may prevent setting certain properties",
+                     "info",
+                     dim_style=True
+                 )
+        
+        # Provide alternative suggestions
+        if property_name.startswith("ro.product."):
+            self._log_message(
+                f"    💡 Alternative: Consider using app-level spoofing, Xposed modules, or custom ROMs for hardware spoofing",
+                "info",
+                dim_style=True
+            )
 
     def restore_property(self, device_id, property_name):
         if not self.config.getboolean(
@@ -1461,12 +1597,29 @@ class DeviceSpoofingManager:
                     )
                     if self._set_user_android_id(device_id, user_id):
                         if self._switch_to_user_with_validation(device_id, user_id):
+                            # Apply automatic device fingerprint randomization for anti-tracking
+                            fingerprint_randomized = self.apply_random_device_fingerprint_for_new_user(device_id)
+                            
                             user_info = {
                                 "user_id": user_id,
                                 "user_name": user_name,
                                 "is_ephemeral": attempt_ephemeral,  # True if ephemeral was successfully created
+                                "fingerprint_randomized": fingerprint_randomized,  # Track if anti-tracking was applied
                             }
                             self.active_spoofed_users[device_id] = user_info
+                            
+                            if fingerprint_randomized:
+                                self._log_message(
+                                    f"  🎯 New user profile created with randomized device fingerprint to prevent app tracking",
+                                    "success",
+                                    dim_style=True
+                                )
+                            else:
+                                self._log_message(
+                                    f"  ⚠️ New user profile created, but device fingerprint randomization was skipped or failed",
+                                    "warning",
+                                    dim_style=True
+                                )
                             break  # Success
                         else:  # Switch failed
                             self._log_message(
@@ -2141,6 +2294,215 @@ class DeviceSpoofingManager:
             )
         return all_set_success
 
+    def apply_random_device_fingerprint_for_new_user(self, device_id):
+        """
+        Automatically applies random device properties when creating a new user profile.
+        This makes each user profile appear as a completely unique device to prevent
+        app tracking across user profiles.
+        """
+        if not self.config.getboolean("ADVANCED_SPOOFING", "auto_spoof_on_user_creation", fallback=True):
+            self._log_message(
+                f"  Auto-spoofing on user creation is disabled. Skipping automatic device randomization.",
+                "info",
+                dim_style=True
+            )
+            return True
+
+        caps = self.device_capabilities.get(device_id) or self.detect_capabilities(device_id)
+        if not (caps.get("root_access") and caps.get("magisk_available")):
+            self._log_message(
+                f"  Root/Magisk required for automatic device spoofing. Skipping for {device_id}.",
+                "warning",
+                dim_style=True
+            )
+            return False
+
+        self._log_message(
+            f"🎲 Applying automatic random device fingerprint for new user profile on {device_id}...",
+            "info"
+        )
+        
+        # Choose random manufacturer and model for maximum uniqueness
+        available_manufacturers = list(self.device_manufacturers_patterns.keys())
+        random_manufacturer_key = random.choice(available_manufacturers)
+        
+        manufacturer_patterns = self.device_manufacturers_patterns[random_manufacturer_key]
+        available_models = manufacturer_patterns.get("models", [])
+        
+        # Pick random model (or None to get auto-generated)
+        if available_models:
+            random_model_choice = random.choice(available_models + [None])
+            random_model_config = random_model_choice.get("name", "") if random_model_choice is not None else ""
+        else:
+            random_model_config = ""
+        
+        # Choose random Android version
+        available_android_versions = list(self.android_version_release_map.keys())
+        random_android_version = random.choice(available_android_versions)
+        
+        self._log_message(
+            f"  🎯 Random target: {random_manufacturer_key.upper()} | {random_model_config or 'Random Model'} | Android {random_android_version}",
+            "debug", 
+            dim_style=True
+        )
+
+        # Apply the standard device spoofing with random parameters
+        spoof_success = self.apply_device_spoofing(
+            device_id,
+            random_manufacturer_key,
+            random_model_config,
+            random_android_version
+        )
+
+        if spoof_success:
+            # Apply additional anti-tracking properties
+            additional_success = self._apply_additional_anti_tracking_props(device_id, random_manufacturer_key)
+            if additional_success:
+                self._log_message(
+                    f"  ✅ Complete device fingerprint randomization applied for new user profile on {device_id}",
+                    "success"
+                )
+            else:
+                self._log_message(
+                    f"  ⚠️ Basic spoofing succeeded, but some additional anti-tracking properties failed on {device_id}",
+                    "warning"
+                )
+            return True
+        else:
+            self._log_message(
+                f"  ❌ Device fingerprint randomization failed for new user profile on {device_id}",
+                "error"
+            )
+            return False
+
+    def _apply_additional_anti_tracking_props(self, device_id, manufacturer_key):
+        """
+        Applies additional properties beyond the standard spoofing set to prevent
+        app tracking through secondary device identifiers.
+        """
+        self._log_message(
+            f"  🔒 Applying additional anti-tracking properties...",
+            "debug",
+            dim_style=True
+        )
+        
+        additional_props = {}
+        
+        # Generate additional hardware identifiers using realistic patterns
+        platform_chipsets = {
+            "samsung": [f"msm{random.choice([8996, 8998, 8150, 8250, 8350])}", f"exynos{random.choice([9820, 9825, 990, 2100, 2200])}"],
+            "google": [f"sdm{random.choice([845, 855, 865, 888, 8150])}", f"gs{random.choice([101, 201, 301])}"],
+            "xiaomi": [f"msm{random.choice([8996, 8998, 8150, 8250, 8350])}", f"sm{random.choice([8150, 8250, 8350, 8450])}"],
+            "oneplus": [f"msm{random.choice([8996, 8998, 8150, 8250, 8350])}", f"sm{random.choice([8150, 8250, 8350])}"],
+            "oppo": [f"msm{random.choice([8996, 8998, 8150, 8250])}", f"mt{random.choice([6889, 6893, 6983])}"],
+        }
+        
+        hardware_names = {
+            "samsung": [f"qcom", f"exynos{random.choice([9820, 9825, 990, 2100, 2200])}"],
+            "google": [f"bramble", f"redfin", f"barbet", f"oriole", f"raven"],
+            "xiaomi": [f"qcom", f"mt{random.choice([6889, 6893, 6983])}"],
+            "oneplus": [f"qcom", f"msmnile"],
+            "oppo": [f"qcom", f"mt{random.choice([6889, 6893, 6983])}"],
+        }
+        
+        selected_platform = random.choice(platform_chipsets.get(manufacturer_key, ["msm8996", "msm8998"]))
+        selected_hardware = random.choice(hardware_names.get(manufacturer_key, ["qcom"]))
+        
+        additional_props.update({
+            "ro.hardware": selected_hardware,
+            "ro.board.platform": selected_platform,
+            "ro.bootloader": self._generate_random_hex_string(8, uppercase=True),
+            "ro.boot.revision": f"rev_{random.randint(10, 99)}",
+            "ro.baseband": f"{random.choice(['g', 'm'])}{random.randint(950, 5200)}-{self._generate_random_hex_string(6, uppercase=True)}",
+        })
+        
+        # Generate network/connectivity randomization
+        additional_props.update({
+            "ro.telephony.call_ring.multiple": str(random.choice([True, False])).lower(),
+            "ro.wifi.channels": "",  # Clear to avoid network fingerprinting
+            "wifi.interface": random.choice(["wlan0", "wlan1", "wifi0"]),
+        })
+        
+        # Generate display properties variation
+        density_options = [120, 160, 213, 240, 320, 400, 480, 560, 640]
+        additional_props.update({
+            "ro.sf.lcd_density": str(random.choice(density_options)),
+        })
+        
+        # Generate locale/regional variation to avoid geographic tracking
+        locales = ["en_US", "en_GB", "en_CA", "en_AU", "de_DE", "fr_FR", "ja_JP", "ko_KR"]
+        random_locale = random.choice(locales)
+        lang, region = random_locale.split("_")
+        additional_props.update({
+            "ro.product.locale.language": lang,
+            "ro.product.locale.region": region,
+        })
+        
+        # Generate system service variations
+        ringtones = ["Thema.ogg", "Over_the_Horizon.ogg", "One_UI.ogg", "Spaceline.ogg"]
+        notifications = ["Skyline.ogg", "Silk.ogg", "Popcorn.ogg", "Crystal.ogg"]
+        alarms = ["Morning_flower.ogg", "Good_morning.ogg", "Homecoming.ogg", "Sunrise.ogg"]
+        
+        additional_props.update({
+            "ro.config.ringtone": random.choice(ringtones),
+            "ro.config.notification_sound": random.choice(notifications),
+            "ro.config.alarm_alert": random.choice(alarms),
+        })
+        
+        # Filter properties that are safe to set and exist in our master list
+        combined_master_list = list(set(
+            self.COMPREHENSIVE_DEFAULT_PROPS_TO_SPOOF + 
+            self.ANTI_TRACKING_EXTENDED_PROPS
+        ))
+        
+        filtered_additional_props = {
+            k: v for k, v in additional_props.items() 
+            if any(k in master_prop or k.startswith(master_prop.replace("*", "")) for master_prop in combined_master_list)
+        }
+        
+        if not filtered_additional_props:
+            self._log_message(
+                f"    No additional anti-tracking properties to apply based on current master list",
+                "debug",
+                dim_style=True
+            )
+            return True
+        
+        # Apply the additional properties
+        all_success = True
+        self._log_message(
+            f"    Applying {len(filtered_additional_props)} additional anti-tracking properties...",
+            "debug",
+            dim_style=True
+        )
+        
+        for prop_name, prop_value in filtered_additional_props.items():
+            if not self.validate_property(prop_name, prop_value):
+                self._log_message(
+                    f"    ⚠️ Invalid additional property format for {prop_name}: '{prop_value}'. Skipping.",
+                    "warning",
+                    dim_style=True
+                )
+                continue
+                
+            if not self.set_property_with_resetprop(device_id, prop_name, prop_value):
+                all_success = False
+        
+        if all_success:
+            self._log_message(
+                f"    ✓ All additional anti-tracking properties applied successfully",
+                "success",
+                dim_style=True
+            )
+        else:
+            self._log_message(
+                f"    ⚠️ Some additional anti-tracking properties failed to apply",
+                "warning",
+                dim_style=True
+            )
+            
+        return all_success
+
     def _prompt_user_for_cleanup_options(self, device_id, console=None):
         """Prompts user for cleanup options instead of automatic restoration."""
         if not console and not QUESTIONARY_AVAILABLE:
@@ -2392,7 +2754,8 @@ class InteractiveAPKInstaller:
             "debug": "dim blue",
         }
         style = style_map.get(level, "")
-        self.console.print(Text(message, style=style))
+        # Enable markup parsing for rich formatting like [b]...[/b]
+        self.console.print(message, style=style, markup=True)
 
     def ensure_temp_directory(self):
         if (
@@ -3154,6 +3517,7 @@ class InteractiveAPKInstaller:
                     "spoof_serial_number": "true",
                     "spoof_device_model": "true",
                     "spoof_android_version_props": "true",
+                    "auto_spoof_on_user_creation": "true",
                     "backup_original_properties": "true",
                     "bypass_user_limits": "false",
                     "use_ephemeral_users": "true",  # Default to ephemeral, user's config can override
@@ -3254,6 +3618,7 @@ class InteractiveAPKInstaller:
                     "spoof_serial_number",
                     "spoof_device_model",
                     "spoof_android_version_props",
+                    "auto_spoof_on_user_creation",
                     "backup_original_properties",
                     "bypass_user_limits",
                     "use_ephemeral_users",
@@ -3356,6 +3721,7 @@ class InteractiveAPKInstaller:
                 "spoof_serial_number": "true",
                 "spoof_device_model": "true",
                 "spoof_android_version_props": "true",
+                "auto_spoof_on_user_creation": "true",
                 "bypass_user_limits": "false",
                 "use_ephemeral_users": "true",
                 "spoof_manufacturer": "samsung",
@@ -3484,6 +3850,8 @@ spoof_serial_number = true
 spoof_device_model = true
 # spoof_android_version_props: Sets realistic SDK level and Android release version string.
 spoof_android_version_props = true
+# auto_spoof_on_user_creation: Automatically applies random device fingerprint when creating user profiles for anti-tracking.
+auto_spoof_on_user_creation = true
 # backup_original_properties: (Recommended if Magisk ON) Backs up properties before spoofing for reliable restoration.
 backup_original_properties = true
 # bypass_user_limits: (Experimental, Root) Attempts to create users beyond device limits by adjusting 'fw.max_users' and global settings.
@@ -3815,7 +4183,7 @@ validate_root_access = true
                     choices=choices,
                     style=questionary.Style([
                         ('pointer', 'bold fg:yellow'),
-                        ('highlighted', 'fg:yellow'),
+                        ('highlighted', 'fg:white'),  # No special highlighting until selected
                         ('selected', 'fg:cyan bold')
                     ]),
                     # Using default instructions which are helpful
@@ -3949,7 +4317,7 @@ validate_root_access = true
 
         print_additional_device_info()
         
-        # For device selection, offer both single and multi-selection options
+        # Unified device selection interface
         if len(devices_list_param) == 1:
             # Only one device, auto-select it
             self._log_message(f"✓ Auto-selected single device:", "success")
@@ -3957,41 +4325,14 @@ validate_root_access = true
                 self.console.print(f"  • {formatter(devices_list_param[0])}")
             return devices_list_param
         else:
-            # Multiple devices - ask user preference
+            # Multiple devices - unified selection interface
             if self.console:
                 self.console.print(
-                    "💡 Choose selection mode: single device or multiple devices (default: single)",
+                    "💡 Use [Enter] to select highlighted device, or [Spacebar] to select multiple devices, then [Enter] to confirm",
                     style="dim"
                 )
             
-            try:
-                mode_choice = questionary.select(
-                    "Selection mode:",
-                    choices=[
-                        questionary.Choice("Single device (navigate with arrows, press Enter)", "single"),
-                        questionary.Choice("Multiple devices (use spacebar to select, press Enter)", "multi")
-                    ],
-                    default="single",
-                    style=questionary.Style([
-                        ('question', 'bold'),
-                        ('pointer', 'fg:yellow bold'),
-                        ('highlighted', 'fg:yellow'),
-                        ('selected', 'fg:cyan bold'),
-                        ('answer', 'fg:cyan bold')
-                    ])
-                ).ask()
-                
-                if mode_choice is None:  # User pressed Ctrl+C
-                    raise KeyboardInterrupt
-                    
-                if mode_choice == "single":
-                    return self._prompt_single_selection(devices_list_param, "Device", formatter)
-                else:
-                    return self._prompt_interactive_selection(devices_list_param, "Device", formatter)
-                    
-            except KeyboardInterrupt:
-                self._log_message("\nDevice selection cancelled.", "yellow")
-                return []
+            return self._prompt_interactive_selection(devices_list_param, "Device", formatter)
 
     def find_apk_files(self):
         """Find APK, XAPK, APKM, and ZIP files in the configured directory."""
@@ -4096,7 +4437,7 @@ validate_root_access = true
 
         print_additional_apk_info()
         
-        # For APK selection, offer both single and multi-selection options
+        # Unified file selection interface
         if len(apk_files_list_param) == 1:
             # Only one file, auto-select it
             self._log_message(f"✓ Auto-selected single file:", "success")
@@ -4104,41 +4445,14 @@ validate_root_access = true
                 self.console.print(f"  • {formatter(apk_files_list_param[0])}")
             return apk_files_list_param
         else:
-            # Multiple files - ask user preference
+            # Multiple files - unified selection interface
             if self.console:
                 self.console.print(
-                    "💡 Choose selection mode: single file or multiple files (default: single)",
+                    "💡 Use [Enter] to select highlighted file, or [Spacebar] to select multiple files, then [Enter] to confirm",
                     style="dim"
                 )
             
-            try:
-                mode_choice = questionary.select(
-                    "Selection mode:",
-                    choices=[
-                        questionary.Choice("Single file (navigate with arrows, press Enter)", "single"),
-                        questionary.Choice("Multiple files (use spacebar to select, press Enter)", "multi")
-                    ],
-                    default="single",
-                    style=questionary.Style([
-                        ('question', 'bold'),
-                        ('pointer', 'fg:yellow bold'),
-                        ('highlighted', 'fg:yellow'),
-                        ('selected', 'fg:cyan bold'),
-                        ('answer', 'fg:cyan bold')
-                    ])
-                ).ask()
-                
-                if mode_choice is None:  # User pressed Ctrl+C
-                    raise KeyboardInterrupt
-                    
-                if mode_choice == "single":
-                    return self._prompt_single_selection(apk_files_list_param, "APK/XAPK/APKM/ZIP File", formatter)
-                else:
-                    return self._prompt_interactive_selection(apk_files_list_param, "APK/XAPK/APKM/ZIP File", formatter)
-                    
-            except KeyboardInterrupt:
-                self._log_message("\nFile selection cancelled.", "yellow")
-                return []
+            return self._prompt_interactive_selection(apk_files_list_param, "APK/XAPK/APKM/ZIP File", formatter)
 
     def confirm_installation(self, selected_devices_list, selected_files_list):
         self._log_message("\n📋 Installation Summary", "bold blue")
@@ -5501,6 +5815,15 @@ validate_root_access = true
                 "Magisk Spoofing ON",
             ),
             (
+                "14",
+                "Anti-Track",
+                "Auto-Spoof on User Creation",
+                "ADVANCED_SPOOFING",
+                "auto_spoof_on_user_creation",
+                "bool",
+                "Random fingerprint per profile",
+            ),
+            (
                 "S1",
                 "Magisk Gen",
                 "Target Manufacturer",
@@ -5767,6 +6090,9 @@ validate_root_access = true
 - [b]Spoof Device Model Props[/b]: Modifies properties related to the device model, such
   as `ro.product.model`, `ro.product.brand`, `ro.product.manufacturer`, `ro.product.name`, `ro.product.device`, and `ro.product.board`.
 - [b]Spoof Android Version Props[/b]: Adjusts properties like `ro.build.version.release` (e.g., "13", "14") and `ro.build.version.sdk` (e.g., 33, 34).
+
+[bold]Anti-Tracking Options[/bold] (Prevents app tracking across user profiles)
+- [b]Auto-Spoof on User Creation[/b]: Automatically applies a completely random device fingerprint when creating new user profiles. This makes each user profile appear as a unique device, preventing apps from tracking that you already have the app installed in another profile. Uses random manufacturer, model, Android version, and additional anti-tracking properties like hardware identifiers, network settings, display density, and locale/regional variations.
 
 [bold]Magisk Generation Parameters[/bold] (Used for generating values for Magisk Property Spoofing)
 - [b]Target Manufacturer[/b]: Selects the base manufacturer profile (e.g., `samsung`, `google`, `xiaomi`) from `device_patterns.json` to guide property generation.
