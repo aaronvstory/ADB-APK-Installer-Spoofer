@@ -184,10 +184,11 @@ temp_*/
 extracted_*/
 *.log
 
-# APK files (optional - uncomment if you don't want to track APK files)
-# *.apk
-# *.xapk
-# *.apkm
+# APK files - excluded to reduce repository size
+*.apk
+*.xapk
+*.apkm
+# Keep ZIP files as they might contain other project files
 # *.zip
 
 # Configuration backups
