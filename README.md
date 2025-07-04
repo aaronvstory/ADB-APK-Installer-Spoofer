@@ -1,4 +1,4 @@
-# ADB APK Installer & Spoofer v4.1.1 (Phoenix)
+# ADB APK Installer & Spoofer v4.5.2 (Odyssey)
 
 <div align="center">
   <pre>
@@ -9,7 +9,7 @@
 ██║  ██║██████╔╝██████╔╝   ██║  ██║██║     ██║  ██╗
 ╚═╝  ╚═╝╚═════╝ ╚═════╝    ╚═╝  ╚═╝╚═╝     ╚═╝  ╚═╝
         Interactive APK Installation Tool
-             v4.1.1 (Phoenix)
+             v4.5.2 (Odyssey)
 </pre>
   <p><strong>An advanced, interactive command-line tool for installing Android applications and dynamically spoofing device identity with a focus on privacy and anti-tracking.</strong></p>
 
@@ -29,6 +29,24 @@ This tool provides a professional suite for Android application installation and
 
 The latest version introduces a powerful **anti-tracking engine** that automatically randomizes a device's entire fingerprint for each new user profile, making it significantly harder for applications to track a user across different sandboxes.
 
+---
+
+## 🚀 What's New in v4.5.2 (Odyssey)
+
+- **Major codebase cleanup:** All duplicate class/function definitions removed, merge artifacts fixed.
+- **Custom profile naming:** Prompt for a custom name when creating a new user profile, with timestamp fallback.
+- **User Profile Management:** Interactive menu to list and remove user profiles on a device.
+- **Enhanced clipboard support:** Attempts to enable clipboard for new user profiles, with clear warnings about third-party requirements.
+- **Robust dependency installer:** Auto-installs `rich`, `pyaxmlparser`, and `questionary` if missing.
+- **Improved error handling and exit codes.**
+- **More robust configuration and fallback logic.**
+- **Clearer user prompts and warnings for non-standard features.**
+- **New Windows BAT launcher:** `apk_installerv4.5.2.bat` for seamless startup and config integration.
+
+See [CHANGELOG.md](./CHANGELOG.md) for a full list of changes.
+
+---
+
 ## Key Features
 
 ### 📦 Universal Installer
@@ -45,6 +63,7 @@ The latest version introduces a powerful **anti-tracking engine** that automatic
     -   Create temporary **ephemeral users** (Android 8+) that are automatically deleted on reboot.
     -   Create standard (permanent) secondary users for persistent testing environments.
     -   (Root) Automatically set a unique Android ID for each new user profile.
+    -   **NEW:** List and remove user profiles interactively.
 -   **Persistent Spoofing & Interactive Cleanup**: By default, spoofed environments are now persistent. At the end of a session, the script interactively prompts you to choose exactly what you want to restore, giving you full control over your testing environments.
 
 ### ✨ Usability & Interface
@@ -52,7 +71,7 @@ The latest version introduces a powerful **anti-tracking engine** that automatic
 -   **Rich Console UI**: A beautifully formatted interface with tables, panels, status indicators, and color-coded logging.
 -   **Interactive Configuration**: A dedicated menu to visually manage all spoofing settings without manually editing `config.ini`.
 -   **Capability Detection**: Scans connected devices to report their support for multi-user, ephemeral users, and root access.
--   **Phone Management Tools**: Includes utilities like a PC-to-Android clipboard setter.
+-   **Phone Management Tools**: Includes utilities like a PC-to-Android clipboard setter (with improved warnings and fallback logic).
 
 ## Getting Started
 
@@ -71,10 +90,10 @@ The latest version introduces a powerful **anti-tracking engine** that automatic
     -   Put your `.apk`, `.xapk`, `.apkm`, or `.zip` files into the `apks/` directory.
 
 3.  **Run the tool:**
-    -   **Windows**: Double-click the `.bat` launcher file.
+    -   **Windows**: Double-click the new `apk_installerv4.5.2.bat` launcher file.
     -   **Linux/macOS**:
         ```bash
-        python3 apk_installer.py
+        python3 apk_installerv4.5.2.py
         ```
 
 On the first run, the script will guide you through installing any missing Python dependencies. After that, you're ready to go!
