@@ -138,12 +138,19 @@ class DeviceSpoofingManager:
         "ro.config.alarm_alert",
         "ro.config.notification_sound", 
         "ro.config.ringtone",
-        # Network/connectivity properties
+        # Network/connectivity properties - ENHANCED for MAC/Wi-Fi spoofing
         "ro.telephony.call_ring.multiple",
         "ro.telephony.default_network",
         "ro.telephony.ril.config",
         "wifi.interface",
         "ro.wifi.channels",
+        "persist.service.bdroid.bdaddr",  # Bluetooth MAC address
+        # Kernel & radio versions for SafetyNet/Play Integrity
+        "ro.kernel.version",
+        "ro.boot.kernel.version", 
+        "ro.radio.version",
+        "ro.boot.radio.version",
+        "ro.build.kernel.id",
         # Display/UI properties
         "ro.sf.lcd_density",
         "ro.config.density_split",
@@ -156,6 +163,11 @@ class DeviceSpoofingManager:
         "ro.vendor.build.fingerprint",
         "ro.system_ext.build.fingerprint",
         "ro.product_services.build.fingerprint",
+        # Google Services Framework & DRM/Widevine mitigation targets
+        # NOTE: These require special handling beyond property setting
+        # GSF ID reset: pm clear com.google.android.gms + gsfreset broadcast
+        # Widevine: clear /data/misc/widevine before user first boot  
+        # AAID reset: handled via GSF reset process
     ]
 
     def __init__(self, adb_path="adb", console=None, config=None):
@@ -176,6 +188,228 @@ class DeviceSpoofingManager:
             "android_versions", self._get_default_android_version_release_map()
         )
         self.internal_sdk_map = self._get_default_internal_sdk_map()
+
+    # --- NEW: persistent fingerprint helper -----------------------------------
+    PERSISTENCE_PATH = "/data/local/tmp/.fingerprints.json"  # world-readable, survives reboots
+
+    def _load_fingerprint_store(self, device_id):
+        """Return {user_id: str_fingerprint} loaded from device or {} if none."""
+        res = self._run_adb_shell_command(device_id, ["cat", self.PERSISTENCE_PATH])
+        try:
+            if res.returncode == 0 and res.stdout.strip():
+                return json.loads(res.stdout)
+        except json.JSONDecodeError:
+            pass
+        return {}
+
+    def _save_fingerprint_store(self, device_id, store_dict):
+        tmp_local = tempfile.NamedTemporaryFile(delete=False)
+        try:
+            tmp_local.write(json.dumps(store_dict, indent=0).encode())
+            tmp_local.close()
+            # push -> chmod 0644 so any user can read during future sessions
+            self._run_adb_shell_command(
+                device_id,
+                ["mkdir", "-p", os.path.dirname(self.PERSISTENCE_PATH)],
+            )
+            subprocess.run(
+                [self.adb_path, "-s", device_id, "push", tmp_local.name, self.PERSISTENCE_PATH],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self._run_adb_shell_command(device_id, ["chmod", "0644", self.PERSISTENCE_PATH])
+        finally:
+            os.unlink(tmp_local.name)
+
+    def apply_persistent_fingerprint_for_user(self, device_id, user_id):
+        """
+        Ensure one stable fingerprint per (device, user). Generate once, then read
+        it back on every subsequent run – no user interaction required.
+        """
+        store = self._load_fingerprint_store(device_id)
+        if str(user_id) in store:
+            fp = store[str(user_id)]
+            self._log_message(f"  Re-using persisted fingerprint for user {user_id}", "info", dim_style=True)
+        else:
+            # pick random manufacturer / model / android version just like today
+            mfg = random.choice(list(self.device_manufacturers_patterns.keys()))
+            model = ""
+            android_ver = random.choice(list(self.android_version_release_map.keys()))
+            # generate_realistic_fingerprint() is your existing helper wrapped below:
+            fp = self.generate_realistic_fingerprint(
+                mfg,
+                random.choice(self.device_manufacturers_patterns[mfg]["models"]),
+                android_ver,
+            )
+            store[str(user_id)] = fp
+            self._save_fingerprint_store(device_id, store)
+            self._log_message(f"  🎯 Generated NEW persistent fingerprint for user {user_id}", "success")
+
+        # Actually set it (+ derived vendor/system fingerprints) without backup prompts
+        for prop in (
+            "ro.build.fingerprint",
+            "ro.vendor.build.fingerprint",
+            "ro.system.build.fingerprint",
+            "ro.odm.build.fingerprint",
+        ):
+            self.set_property_with_resetprop(device_id, prop, fp)
+        
+        # Apply advanced anti-tracking measures (GSF, Widevine, etc.)
+        advanced_success = self._apply_advanced_anti_tracking_measures(device_id, user_id)
+        
+        return True and advanced_success
+    
+    def _apply_advanced_anti_tracking_measures(self, device_id, user_id):
+        """
+        Apply advanced anti-tracking measures including GSF ID reset, Widevine clearing,
+        and other sophisticated fingerprinting countermeasures.
+        """
+        self._log_message(
+            f"  🔐 Applying advanced anti-tracking measures for user {user_id}...",
+            "debug",
+            dim_style=True
+        )
+        
+        success_count = 0
+        total_attempts = 0
+        
+        # 1. Clear Google Services Framework ID and Advertising ID
+        total_attempts += 1
+        try:
+            # Clear GSF data which resets both GSF ID and Advertising ID 
+            gsf_clear_result = self._run_adb_shell_command(
+                device_id, 
+                ["pm", "clear", "com.google.android.gms"], 
+                as_root=True, 
+                target_user_id=user_id
+            )
+            if gsf_clear_result.returncode == 0:
+                self._log_message(
+                    f"    ✓ GSF/AAID reset completed for user {user_id}",
+                    "debug", 
+                    dim_style=True
+                )
+                success_count += 1
+                
+                # Send GSF reset broadcast to ensure immediate effect
+                broadcast_result = self._run_adb_shell_command(
+                    device_id,
+                    ["am", "broadcast", "-a", "com.google.android.gms.gsf.action.CLEAR_ALL"],
+                    as_root=True,
+                    target_user_id=user_id
+                )
+                if broadcast_result.returncode == 0:
+                    self._log_message(
+                        f"    ✓ GSF reset broadcast sent for user {user_id}",
+                        "debug",
+                        dim_style=True
+                    )
+            else:
+                self._log_message(
+                    f"    ⚠️ GSF clear failed for user {user_id}: {gsf_clear_result.stderr}",
+                    "warning",
+                    dim_style=True
+                )
+        except Exception as e:
+            self._log_message(
+                f"    ⚠️ GSF reset exception for user {user_id}: {str(e)}",
+                "warning",
+                dim_style=True
+            )
+        
+        # 2. Clear Widevine DRM provisioning data
+        total_attempts += 1
+        try:
+            # Clear Widevine directory to reset DRM provisioning ID
+            widevine_clear_result = self._run_adb_shell_command(
+                device_id,
+                ["rm", "-rf", "/data/misc/widevine/*"],
+                as_root=True
+            )
+            if widevine_clear_result.returncode == 0:
+                self._log_message(
+                    f"    ✓ Widevine DRM data cleared for user {user_id}",
+                    "debug",
+                    dim_style=True  
+                )
+                success_count += 1
+            else:
+                self._log_message(
+                    f"    ⚠️ Widevine clear failed for user {user_id}",
+                    "warning",
+                    dim_style=True
+                )
+        except Exception as e:
+            self._log_message(
+                f"    ⚠️ Widevine clear exception for user {user_id}: {str(e)}",
+                "warning", 
+                dim_style=True
+            )
+        
+        # 3. Randomize Wi-Fi country code to prevent geographic tracking
+        total_attempts += 1
+        try:
+            country_codes = ["US", "GB", "CA", "AU", "DE", "FR", "JP", "KR", "NL", "SE"]
+            random_country = random.choice(country_codes)
+            country_result = self.set_property_with_resetprop(
+                device_id, 
+                "ro.wifi.country", 
+                random_country
+            )
+            if country_result:
+                self._log_message(
+                    f"    ✓ Wi-Fi country code randomized to {random_country} for user {user_id}",
+                    "debug",
+                    dim_style=True
+                )
+                success_count += 1
+        except Exception as e:
+            self._log_message(
+                f"    ⚠️ Wi-Fi country randomization failed for user {user_id}: {str(e)}",
+                "warning",
+                dim_style=True  
+            )
+        
+        # 4. Clear location services data to prevent location-based tracking
+        total_attempts += 1
+        try:
+            location_clear_result = self._run_adb_shell_command(
+                device_id,
+                ["rm", "-rf", f"/data/user/{user_id}/com.google.android.location/*"],
+                as_root=True
+            )
+            if location_clear_result.returncode == 0:
+                self._log_message(
+                    f"    ✓ Location services data cleared for user {user_id}",
+                    "debug",
+                    dim_style=True
+                )
+                success_count += 1
+        except Exception as e:
+            self._log_message(
+                f"    ⚠️ Location services clear failed for user {user_id}: {str(e)}",
+                "warning",
+                dim_style=True
+            )
+        
+        success_rate = success_count / total_attempts if total_attempts > 0 else 0
+        
+        if success_rate >= 0.75:  # 75% success rate threshold
+            self._log_message(
+                f"    ✅ Advanced anti-tracking measures applied ({success_count}/{total_attempts} successful)",
+                "success",
+                dim_style=True
+            )
+            return True
+        else:
+            self._log_message(
+                f"    ⚠️ Some advanced anti-tracking measures failed ({success_count}/{total_attempts} successful)",
+                "warning",
+                dim_style=True
+            )
+            return False
+    # --- END persistent fingerprint helper ------------------------------------
 
     def _create_default_config_for_standalone(self):
         # This is primarily for when DeviceSpoofingManager is used standalone,
@@ -1624,8 +1858,8 @@ class DeviceSpoofingManager:
                     )
                     if self._set_user_android_id(device_id, user_id):
                         if self._switch_to_user_with_validation(device_id, user_id):
-                            # Apply automatic device fingerprint randomization for anti-tracking
-                            fingerprint_randomized = self.apply_random_device_fingerprint_for_new_user(device_id)
+                            # Apply persistent device fingerprint for consistent anti-tracking  
+                            fingerprint_randomized = self.apply_persistent_fingerprint_for_user(device_id, user_id)
                             
                             user_info = {
                                 "user_id": user_id,
@@ -2415,13 +2649,41 @@ class DeviceSpoofingManager:
         
         additional_props = {}
         
-        # Generate additional hardware identifiers using realistic patterns
+        # Generate additional hardware identifiers using realistic patterns  
         platform_chipsets = {
             "samsung": [f"msm{random.choice([8996, 8998, 8150, 8250, 8350])}", f"exynos{random.choice([9820, 9825, 990, 2100, 2200])}"],
             "google": [f"sdm{random.choice([845, 855, 865, 888, 8150])}", f"gs{random.choice([101, 201, 301])}"],
             "xiaomi": [f"msm{random.choice([8996, 8998, 8150, 8250, 8350])}", f"sm{random.choice([8150, 8250, 8350, 8450])}"],
             "oneplus": [f"msm{random.choice([8996, 8998, 8150, 8250, 8350])}", f"sm{random.choice([8150, 8250, 8350])}"],
             "oppo": [f"msm{random.choice([8996, 8998, 8150, 8250])}", f"mt{random.choice([6889, 6893, 6983])}"],
+        }
+        
+        # Generate realistic kernel versions for SafetyNet/Play Integrity
+        kernel_versions = {
+            "samsung": [f"5.4.{random.randint(100, 300)}-{random.randint(20000000, 99999999)}", 
+                       f"5.10.{random.randint(50, 200)}-{random.randint(20000000, 99999999)}"],
+            "google": [f"5.10.{random.randint(100, 300)}-{random.randint(20000000, 99999999)}", 
+                      f"5.15.{random.randint(1, 100)}-{random.randint(20000000, 99999999)}"],
+            "xiaomi": [f"5.4.{random.randint(100, 300)}-{random.randint(20000000, 99999999)}", 
+                      f"5.10.{random.randint(50, 200)}-{random.randint(20000000, 99999999)}"],
+            "oneplus": [f"5.4.{random.randint(100, 300)}-{random.randint(20000000, 99999999)}", 
+                       f"5.10.{random.randint(50, 200)}-{random.randint(20000000, 99999999)}"],
+            "oppo": [f"5.4.{random.randint(100, 300)}-{random.randint(20000000, 99999999)}", 
+                    f"5.10.{random.randint(50, 200)}-{random.randint(20000000, 99999999)}"],
+        }
+        
+        # Generate realistic radio versions  
+        radio_versions = {
+            "samsung": [f"G988BXXU{random.randint(1,9)}EU{random.randint(1,9)}A", 
+                       f"G998BXXU{random.randint(1,9)}EV{random.randint(1,9)}A"],
+            "google": [f"g5123b-{self._generate_random_hex_string(8, uppercase=True)}", 
+                      f"husky-{self._generate_random_hex_string(8, uppercase=True)}"],
+            "xiaomi": [f"V{random.randint(10,15)}.{random.randint(0,9)}.{random.randint(1,30)}.0.QFXMIXM", 
+                      f"V{random.randint(10,15)}.{random.randint(0,9)}.{random.randint(1,30)}.0.RJXMIXM"],
+            "oneplus": [f"2.{random.randint(0,9)}.0_O.{random.randint(0,99)}", 
+                       f"2.{random.randint(0,9)}.1_O.{random.randint(0,99)}"],
+            "oppo": [f"RF_V{random.randint(1,9)}.{random.randint(0,9)}_B.{random.randint(1,99)}", 
+                    f"RF_V{random.randint(1,9)}.{random.randint(0,9)}_C.{random.randint(1,99)}"],
         }
         
         hardware_names = {
@@ -2434,6 +2696,16 @@ class DeviceSpoofingManager:
         
         selected_platform = random.choice(platform_chipsets.get(manufacturer_key, ["msm8996", "msm8998"]))
         selected_hardware = random.choice(hardware_names.get(manufacturer_key, ["qcom"]))
+        selected_kernel = random.choice(kernel_versions.get(manufacturer_key, ["5.4.200-20230101"]))
+        selected_radio = random.choice(radio_versions.get(manufacturer_key, ["Unknown"]))
+        
+        # Generate random MAC addresses for network fingerprinting prevention
+        def generate_mac_address():
+            """Generate realistic MAC address with proper OUI"""
+            # Use common OUI prefixes from major manufacturers
+            oui_prefixes = ["00:1A:2B", "00:50:56", "08:00:27", "52:54:00", "02:00:4C", "00:16:3E"]
+            selected_oui = random.choice(oui_prefixes)
+            return f"{selected_oui}:{self._generate_random_hex_string(2, uppercase=True)}:{self._generate_random_hex_string(2, uppercase=True)}:{self._generate_random_hex_string(2, uppercase=True)}"
         
         additional_props.update({
             "ro.hardware": selected_hardware,
@@ -2441,6 +2713,14 @@ class DeviceSpoofingManager:
             "ro.bootloader": self._generate_random_hex_string(8, uppercase=True),
             "ro.boot.revision": f"rev_{random.randint(10, 99)}",
             "ro.baseband": f"{random.choice(['g', 'm'])}{random.randint(950, 5200)}-{self._generate_random_hex_string(6, uppercase=True)}",
+            # Enhanced kernel & radio versions for SafetyNet/Play Integrity  
+            "ro.kernel.version": selected_kernel,
+            "ro.boot.kernel.version": selected_kernel,
+            "ro.radio.version": selected_radio,
+            "ro.boot.radio.version": selected_radio,
+            "ro.build.kernel.id": f"kernel-{self._generate_random_hex_string(10, uppercase=True)}",
+            # MAC address randomization for network fingerprinting prevention
+            "persist.service.bdroid.bdaddr": generate_mac_address(),
         })
         
         # Generate network/connectivity randomization
