@@ -4200,7 +4200,7 @@ validate_root_access = true
                 # Show instructions for better UX
                 if self.console:
                     self.console.print(
-                        "💡 Use arrow keys to navigate, [space] to select/deselect, [a] to select all, [i] to invert, [enter] to confirm",
+                        "💡 Use arrow keys to navigate, [bold]SPACEBAR[/bold] to select/deselect, [bold]A[/bold] to select all, [bold]I[/bold] to invert, [bold]ENTER[/bold] to confirm",
                         style="dim"
                     )
                 
@@ -4229,7 +4229,7 @@ validate_root_access = true
                     # Give user clear guidance on what to do
                     if self.console:
                         self.console.print(
-                            f"⚠️ No {item_type_name_plural.lower()} selected! Use [space] to select items, then [enter] to confirm.",
+                            f"⚠️ No {item_type_name_plural.lower()} selected! Use [bold]SPACEBAR[/bold] to select items, then [bold]ENTER[/bold] to confirm.",
                             style="yellow"
                         )
                     
@@ -4267,7 +4267,7 @@ validate_root_access = true
             # Show instructions for better UX
             if self.console:
                 self.console.print(
-                    "💡 Use arrow keys to navigate, [enter] to select highlighted item",
+                    "💡 Use arrow keys to navigate, [bold]ENTER[/bold] to select highlighted item",
                     style="dim"
                 )
             
@@ -4354,7 +4354,7 @@ validate_root_access = true
             # Multiple devices - unified selection interface
             if self.console:
                 self.console.print(
-                    "💡 Use [Enter] to select highlighted device, or [Spacebar] to select multiple devices, then [Enter] to confirm",
+                    "💡 Use [bold]ENTER[/bold] to select highlighted device, or [bold]SPACEBAR[/bold] to select multiple devices, then [bold]ENTER[/bold] to confirm",
                     style="dim"
                 )
             
@@ -4474,7 +4474,7 @@ validate_root_access = true
             # Multiple files - unified selection interface
             if self.console:
                 self.console.print(
-                    "💡 Use [Enter] to select highlighted file, or [Spacebar] to select multiple files, then [Enter] to confirm",
+                    "💡 Use [bold]ENTER[/bold] to select highlighted file, or [bold]SPACEBAR[/bold] to select multiple files, then [bold]ENTER[/bold] to confirm",
                     style="dim"
                 )
             
