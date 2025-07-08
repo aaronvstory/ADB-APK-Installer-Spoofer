@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """
-Professional APK Installation Tool - v4.1.1 "Phoenix"
+Professional APK Installation Tool - v4.5.2 "Odyssey"
 - Merged Features: Combines the best of v3.5.0 and v4.0.0.
 - New Feature: Automatic dependency installer for rich, pyaxmlparser, questionary.
 - New Feature: Interactive multi-selection menu for APKs/devices via `questionary`.
+- New Feature: Prompt for custom user profile names, with a timestamped default.
+- New Feature: "User Profile Management" menu to list and remove existing profiles on a device.
 - Restored: Full interactive spoofing configuration menu from v3.5.0.
 - Restored: "Phone Management Tools" menu with clipboard setter.
 - Restored: Robust installation logic with detailed error parsing and uninstall-on-conflict prompts.
 - Fix: Corrected interactive selection logic to re-prompt on empty selection, improving user experience.
+- Fix: Attempt to enable clipboard for new user profiles to improve integration with tools like scrcpy.
 - General code polish, updated versioning, and refined logging.
 """
 
@@ -55,7 +58,7 @@ except ImportError:
 
 
 DEVICE_PATTERNS_FILE = "device_patterns.json"
-SCRIPT_VERSION = "v4.1.1"
+SCRIPT_VERSION = "v4.5.2"
 
 
 # --- BEGIN DeviceSpoofingManager (From v3.5.0 - Mature & Complete) ---
@@ -1495,9 +1498,33 @@ class DeviceSpoofingManager:
             )
             return None
 
-        timestamp = int(time.time())
-        user_name_prefix = "PermUser" if create_permanent_user_flag else "EphUser"
-        user_name = f"{user_name_prefix}{timestamp}_{random.randint(100, 999)}"
+        # Prompt for user profile name
+        default_name = datetime.now().strftime("%m-%d-%y_%H-%M")
+        user_name = ""
+        if QUESTIONARY_AVAILABLE and self.console:
+            try:
+                user_name = questionary.text(
+                    f"Enter name for new {user_type_str} profile (or press Enter for default: {default_name}):",
+                    default="",  # Start with empty to check if user provides input
+                    style=questionary.Style([('question', 'fg:yellow'), ('answer', 'fg:cyan bold')])
+                ).ask()
+                if user_name is None:  # User cancelled
+                    self._log_message("User profile creation cancelled.", "yellow")
+                    return None
+                if not user_name.strip():  # User pressed Enter
+                    user_name = default_name
+            except KeyboardInterrupt:
+                self._log_message("\nUser profile creation cancelled.", "yellow")
+                return None
+        else:
+            try:
+                prompt_text = f"Enter name for new {user_type_str} profile (default: {default_name}): "
+                user_name = input(prompt_text).strip()
+                if not user_name:
+                    user_name = default_name
+            except KeyboardInterrupt:
+                self._log_message("\nUser profile creation cancelled.", "yellow")
+                return None
 
         self._log_message(
             f"👤 Attempting to create {user_type_str} user '{user_name}' on {device_id}...",
@@ -2856,8 +2883,7 @@ class InteractiveAPKInstaller:
         if (
             self.package_parser_preference == "aapt"
             or not PYAXMLPARSER_AVAILABLE
-            or (PYAXMLPARSER_AVAILABLE and not PYAXMLPARSER_AVAILABLE)
-        ):  # If pyaxmlparser failed
+        ):  # If pyaxmlparser failed or aapt is preferred
             try:
                 adb_dir = Path(self.adb_path).parent
                 # Common locations for aapt
@@ -3374,7 +3400,7 @@ class InteractiveAPKInstaller:
 ██║  ██║██████╔╝██████╔╝   ██║  ██║██║     ██║  ██╗
 ╚═╝  ╚═╝╚═════╝ ╚═════╝    ╚═╝  ╚═╝╚═╝     ╚═╝  ╚═╝
         Interactive APK Installation Tool
-             {SCRIPT_VERSION} (Phoenix)
+             {SCRIPT_VERSION} (Odyssey)
 """
         if self.console:
             self.console.print(banner_text, style="bold cyan", highlight=False)
@@ -5781,975 +5807,613 @@ validate_root_access = true
             (
                 "10",
                 "Magisk Spoof",
-                "Spoof Build Fingerprint",
+                "Spoof Target Manufacturer",
                 "ADVANCED_SPOOFING",
-                "spoof_build_fingerprint",
-                "bool",
-                "Magisk Spoofing ON",
+                "target_manufacturer",
+                "str",
+                f"Magisk Spoofing ON, choices: {', '.join(mfg_keys[:5])}...",
             ),
             (
                 "11",
                 "Magisk Spoof",
-                "Spoof Serial Number",
+                "Spoof Target Model",
                 "ADVANCED_SPOOFING",
-                "spoof_serial_number",
-                "bool",
-                "Magisk Spoofing ON",
+                "target_model",
+                "str",
+                "Magisk Spoofing ON, varies by manufacturer",
             ),
             (
                 "12",
                 "Magisk Spoof",
-                "Spoof Device Model Props",
+                "Spoof Target Android Version",
                 "ADVANCED_SPOOFING",
-                "spoof_device_model",
-                "bool",
-                "Magisk Spoofing ON",
+                "target_android_version",
+                "str",
+                f"Magisk Spoofing ON, choices: {', '.join(android_ver_keys[:5])}...",
             ),
             (
                 "13",
                 "Magisk Spoof",
-                "Spoof Android Version Props",
+                "Apply Random Fingerprint",
                 "ADVANCED_SPOOFING",
-                "spoof_android_version_props",
+                "apply_random_fingerprint",
                 "bool",
-                "Magisk Spoofing ON",
+                "Magisk Spoofing ON, Random selection",
             ),
             (
                 "14",
-                "Anti-Track",
-                "Auto-Spoof on User Creation",
+                "Magisk Spoof",
+                "Restore After Session",
                 "ADVANCED_SPOOFING",
-                "auto_spoof_on_user_creation",
+                "restore_after_session",
                 "bool",
-                "Random fingerprint per profile",
+                "Magisk Spoofing ON, Auto-restore",
             ),
             (
-                "S1",
-                "Magisk Gen",
-                "Target Manufacturer",
+                "15",
+                "Magisk Spoof",
+                "Comprehensive Cleanup",
                 "ADVANCED_SPOOFING",
-                "spoof_manufacturer",
-                "str",
-                mfg_keys,
+                "comprehensive_cleanup",
+                "bool",
+                "Magisk Spoofing ON, Full cleanup",
             ),
             (
-                "S2",
-                "Magisk Gen",
-                "Target Model (blank=random)",
-                "ADVANCED_SPOOFING",
-                "spoof_model",
-                "str",
-                "e.g., Pixel 8 Pro, SM-S908B",
+                "16",
+                "Phone Tools",
+                "Enable Clipboard Service",
+                "PHONE_TOOLS",
+                "enable_clipboard_service",
+                "bool",
+                "Sets clipboard sync service",
             ),
             (
-                "S3",
-                "Magisk Gen",
-                "Target Android Version",
-                "ADVANCED_SPOOFING",
-                "spoof_android_version",
-                "str",
-                android_ver_keys,
+                "17",
+                "Phone Tools",
+                "Set Device Clipboard",
+                "PHONE_TOOLS",
+                "set_device_clipboard",
+                "bool",
+                "Copies text to device clipboard",
+            ),
+            (
+                "18",
+                "Phone Tools",
+                "Manage User Profiles",
+                "PHONE_TOOLS",
+                "manage_user_profiles",
+                "bool",
+                "List and remove user profiles",
             ),
         ]
 
-    def _display_spoofing_table(self, highlight_id=None):
-        if not RICH_AVAILABLE or not self.console:
-            return
-
-        table = Table(
-            title=f"Current Spoofing Configuration ({SCRIPT_VERSION})",
-            box=box.ROUNDED,
-            show_lines=True,
-            border_style="cyan",
-        )
-        table.add_column("ID", style="dim cyan", width=4, justify="center")
-        table.add_column("Category", style="blue", min_width=14)
-        table.add_column("Option", style="white", min_width=33)
-        table.add_column(
-            "Status / Value", justify="left", min_width=28
-        )  # Wider for values
-        table.add_column(
-            "Notes / Choices", style="yellow", min_width=25, overflow="fold"
-        )  # Allow text to fold
-
-        options_map = self._get_spoofing_options_map()
-
-        for opt_id, cat, desc, section, key, opt_type, notes_or_choices in options_map:
-            # Determine current value from loaded config settings
-            current_value = None
-            if section == "UNIQUENESS":
-                current_value = self.uniqueness_settings.get(key)
-            elif section == "ADVANCED_SPOOFING":
-                current_value = self.advanced_spoofing_settings.get(key)
-
-            # Fallback if somehow not in loaded settings dicts (should not happen with good load_config)
-            if current_value is None and self.config.has_option(section, key):
-                if opt_type == "bool":
-                    current_value = self.config.getboolean(section, key, fallback=False)
-                elif opt_type == "str":
-                    current_value = self.config.get(section, key, fallback="")
-
-            # Format value for display
-            val_display_str = Text("N/A", style="italic red")
-            if current_value is not None:
-                if opt_type == "bool":
-                    val_display_str = (
-                        Text("✅ Enabled", style="green")
-                        if current_value
-                        else Text("❌ Disabled", style="red")
-                    )
-                elif opt_type == "str":
-                    val_display_str = Text(
-                        str(current_value) if current_value else "(empty/random)",
-                        style="italic bright_blue",
-                    )
-
-            # Format notes/choices
-            notes_display_str = ""
-            if isinstance(notes_or_choices, list):  # List of choices for string types
-                notes_display_str = f"e.g., {', '.join(notes_or_choices)}"
-            elif isinstance(notes_or_choices, str):  # Static note
-                notes_display_str = notes_or_choices
-
-            row_style = (
-                "on grey15" if highlight_id == opt_id else ""
-            )  # Highlight selected row
-            table.add_row(
-                Text(
-                    f"▶ {opt_id}" if highlight_id == opt_id else opt_id, style=row_style
-                ),  # Add indicator if highlighted
-                Text(cat, style=row_style),
-                Text(desc, style=row_style),
-                val_display_str,  # Already a Text object
-                Text(notes_display_str, style=row_style),
-            )
-        self.console.print(table)
-
-    def _interactive_toggle_interface(self):
-        options_map = self._get_spoofing_options_map()
-        boolean_options = {
-            opt_id: (section, key, desc)
-            for opt_id, _, desc, section, key, opt_type, _ in options_map
-            if opt_type == "bool"
-        }
-
-        self.console.print(
-            Text.from_markup(
-                "\n[bold cyan]TOGGLE OPTION[/bold cyan] - Enter Option ID (numeric part from table) or 'back':"
-            )
-        )
-
-        chosen_id = (
-            Prompt.ask("Option ID", default="back", console=self.console)
-            .strip()
-            .upper()
-        )
-        if chosen_id == "BACK":
-            return False
-
-        if chosen_id in boolean_options:
-            section, key, desc = boolean_options[chosen_id]
-
-            current_val = False  # Determine current value
-            if section == "UNIQUENESS":
-                current_val = self.uniqueness_settings.get(key, False)
-            elif section == "ADVANCED_SPOOFING":
-                current_val = self.advanced_spoofing_settings.get(key, False)
-
-            new_val = not current_val
-
-            # Confirm toggle
-            self._display_spoofing_table(
-                highlight_id=chosen_id
-            )  # Show table with highlight
-            confirm_toggle = Confirm.ask(
-                Text.from_markup(
-                    f"Toggle '[white]{desc}[/white]' from [i]{'Enabled' if current_val else 'Disabled'}[/i] to [i]{'Enabled' if new_val else 'Disabled'}[/i]?"
-                ),
-                default=True,
-                console=self.console,
-            )
-
-            if confirm_toggle:
-                self.config.set(
-                    section, key, str(new_val).lower()
-                )  # Update underlying ConfigParser object
-                if section == "UNIQUENESS":
-                    self.uniqueness_settings[key] = new_val
-                elif section == "ADVANCED_SPOOFING":
-                    self.advanced_spoofing_settings[key] = new_val
-                self.console.print(
-                    f"✅ '{desc}' set to {'Enabled' if new_val else 'Disabled'}.",
-                    style="green" if new_val else "yellow",
+    def _collect_config_values_from_options(self, options_list):
+        """Collect configuration values from user interaction with options."""
+        config_changes = {}
+        
+        for option_tuple in options_list:
+            option_id, category, description, config_section, config_key, value_type, notes = option_tuple
+            
+            current_value = self.config.get(config_section, config_key, fallback="false" if value_type == "bool" else "")
+            
+            if value_type == "bool":
+                new_value = Confirm.ask(
+                    f"[{option_id}] {description}",
+                    default=current_value.lower() == "true",
+                    console=self.console
                 )
-                return True  # Indicates a change was made
+                config_changes[f"{config_section}.{config_key}"] = str(new_value).lower()
             else:
-                self.console.print("Toggle cancelled.", style="dim")
-                return False
-        else:
-            self.console.print(
-                f"❌ Invalid toggle option ID '{chosen_id}'. Must be a numeric ID for a boolean option.",
-                style="red",
-            )
-            return False
-
-    def _interactive_set_value_interface(self):
-        options_map = self._get_spoofing_options_map()
-        string_options = {
-            opt_id: (section, key, desc, choices_list)
-            for opt_id, _, desc, section, key, opt_type, choices_list in options_map
-            if opt_type == "str"
-        }
-
-        self.console.print(
-            Text.from_markup(
-                "\n[bold cyan]SET VALUE[/bold cyan] - Enter Option ID (S1-S3 from table) or 'back':"
-            )
-        )
-
-        chosen_id = (
-            Prompt.ask("Option ID", default="back", console=self.console)
-            .strip()
-            .upper()
-        )
-        if chosen_id == "BACK":
-            return False
-
-        if chosen_id in string_options:
-            section, key, desc, choices_list_for_prompt = string_options[chosen_id]
-
-            current_val = ""  # Determine current value
-            if section == "ADVANCED_SPOOFING":
-                current_val = self.advanced_spoofing_settings.get(key, "")
-
-            self._display_spoofing_table(
-                highlight_id=chosen_id
-            )  # Show table with highlight
-
-            # Prepare prompt arguments
-            prompt_args = {"console": self.console}
-            if (
-                isinstance(choices_list_for_prompt, list) and choices_list_for_prompt
-            ):  # If specific choices are provided
-                prompt_args["choices"] = choices_list_for_prompt
-                prompt_args["default"] = (
-                    current_val
-                    if current_val in choices_list_for_prompt
-                    else choices_list_for_prompt[0]
+                new_value = Prompt.ask(
+                    f"[{option_id}] {description}",
+                    default=current_value,
+                    console=self.console
                 )
-            else:  # Free text input
-                prompt_args["default"] = current_val
+                config_changes[f"{config_section}.{config_key}"] = new_value
+        
+        return config_changes
 
-            new_val_str = Prompt.ask(
-                Text.from_markup(
-                    f"Enter new value for '[white]{desc}[/white]' (current: '[i]{current_val or '(empty)'}[/i]'):"
-                ),
-                **prompt_args,
-            ).strip()
-
-            # Validate if choices were provided (Prompt.ask already handles this if choices arg is used)
-            # No, Prompt.ask with choices will loop until valid.
-
-            self.config.set(section, key, new_val_str)  # Update underlying ConfigParser
-            if section == "ADVANCED_SPOOFING":
-                self.advanced_spoofing_settings[key] = new_val_str
-
-            self.console.print(
-                f"✅ '{desc}' set to '{new_val_str if new_val_str else '(empty)'}'.",
-                style="green",
-            )
-            return True  # Indicates a change was made
-        else:
-            self.console.print(
-                f"❌ Invalid set value option ID '{chosen_id}'. Must be S1, S2, or S3.",
-                style="red",
-            )
-            return False
-
-    def _show_spoofing_help(self):
-        if not RICH_AVAILABLE or not self.console:
-            print("Help display requires Rich library.")
-            return
-        help_text_markup = f"""
-[bold cyan]🧬 ADVANCED SPOOFING HELP ({SCRIPT_VERSION})[/bold cyan]
-
-[bold]User Profile Spoofing Options[/bold]
-- [b]Enable User Profile Spoofing[/b]: Master toggle for creating isolated Android user profiles for app installations. This helps in achieving a "fresh install" environment. Requires multi-user support on the device.
-- [b]Use Ephemeral Users[/b]: (Recommended if User Profiles ON) Creates temporary users (Android 8.0+). These users are automatically removed when switched away from or on device reboot. If not supported, standard (permanent) users will be created instead.
-- [b]Auto Set Random Android ID[/b]: Assigns a unique, random Android ID to each newly created user profile. This enhances uniqueness. (Requires Root access).
-- [b]Cleanup Profile After Session[/b]: Automatically removes the created user profile (standard or ephemeral if not auto-removed) after the installation session for that device concludes.
-- [b]Auto Switch Back to Owner[/b]: Before cleaning up a temporary user, the script will attempt to switch back to the primary user (User ID 0).
-- [b]Bypass User Limits (Root)[/b]: (Experimental) Attempts to create new users even if the device reports it has reached its maximum user limit. This tries to adjust system properties like 'fw.max_users'. (Requires Root access).
-
-[bold]Magisk Property Spoofing Options[/bold] (All require Root & Magisk)
-- [b]Enable Magisk Properties[/b]: Master toggle. Uses Magisk's `resetprop` tool to modify system properties, effectively changing how the device identifies itself.
-- [b]Backup Original Properties[/b]: (Highly Recommended) Before changing any property with `resetprop`, its original value is backed up. These backups are used for restoration.
-- [b]Spoof Android ID (Current User)[/b]: Modifies the `android_id` for the *current* Android user (typically User ID 0, the owner). This is done via `settings put secure android_id`.
-- [b]Spoof Build Fingerprint[/b]: Alters `ro.build.fingerprint` and related properties (like `ro.build.id`, `ro.build.description`, `ro.build.version.incremental`, etc.) to match a generated or selected device profile.
-- [b]Spoof Serial Number[/b]: Changes `ro.serialno` and `ro.boot.serialno` to new, randomly generated realistic serial numbers.
-- [b]Spoof Device Model Props[/b]: Modifies properties related to the device model, such
-  as `ro.product.model`, `ro.product.brand`, `ro.product.manufacturer`, `ro.product.name`, `ro.product.device`, and `ro.product.board`.
-- [b]Spoof Android Version Props[/b]: Adjusts properties like `ro.build.version.release` (e.g., "13", "14") and `ro.build.version.sdk` (e.g., 33, 34).
-
-[bold]Anti-Tracking Options[/bold] (Prevents app tracking across user profiles)
-- [b]Auto-Spoof on User Creation[/b]: Automatically applies a completely random device fingerprint when creating new user profiles. This makes each user profile appear as a unique device, preventing apps from tracking that you already have the app installed in another profile. Uses random manufacturer, model, Android version, and additional anti-tracking properties like hardware identifiers, network settings, display density, and locale/regional variations.
-
-[bold]Magisk Generation Parameters[/bold] (Used for generating values for Magisk Property Spoofing)
-- [b]Target Manufacturer[/b]: Selects the base manufacturer profile (e.g., `samsung`, `google`, `xiaomi`) from `device_patterns.json` to guide property generation.
-- [b]Target Model[/b]: Specify a device model name (e.g., `Pixel 8 Pro`, `SM-S908B`). If left blank, a random model from the selected manufacturer's list in `device_patterns.json` will be chosen.
-- [b]Target Android Version[/b]: Sets the target Android version (e.g., `13`, `14`, `15` as keys from `device_patterns.json`) for generated properties like SDK level, release string, and build ID patterns.
-
-[bold red]⚠️ IMPORTANT NOTES:[/bold red]
-- Most Magisk spoofing features require a [bold]Rooted device with Magisk installed[/bold] and operational.
-- User Profile Spoofing requires [bold]Multi-User support[/bold] to be enabled on the Android device.
-- Ensure `device_patterns.json` is present and configured for custom device profiles. If it's missing or invalid, internal defaults will be used. A comprehensive `props_to_spoof` list in this JSON file is key for effective Magisk spoofing.
-- Some properties (like `ro.product.model`) can be very difficult to change at runtime, even with root. For persistent changes to such props, a Magisk module modifying them at boot is often more effective.
-- Always ensure your device is [bold]unlocked[/bold] when performing operations like user switching.
-    """
-        help_panel = Panel(
-            Text.from_markup(help_text_markup),
-            title="[b]Spoofing Configuration Help & Notes[/b]",
-            border_style="cyan",
-            box=box.ROUNDED,
-            padding=(1, 2),
-        )
-        self.console.print(help_panel)
-
-    def _save_spoofing_config(self):
+    def _display_configuration_menu(self):
+        """Display interactive configuration menu for spoofing options."""
         if not self.console:
-            print("Error: Console (Rich library) not available for saving.")
+            self._log_message("Configuration menu requires Rich console interface", "error")
             return False
-        try:
-            with open("config.ini", "w", encoding="utf-8") as configfile_handle:
-                self.config.write(configfile_handle)
-            self.console.print(
-                "✅ Configuration saved successfully to config.ini", style="green"
-            )
-            return True
-        except Exception as e_save:
-            self.console.print(
-                f"❌ Error saving configuration to config.ini: {e_save}", style="red"
-            )
-            self.errors.append(f"Failed to save config.ini: {e_save}")
-            return False
-
-    def configure_spoofing_options(self):
-        if not RICH_AVAILABLE or not self.console:
-            self._log_message(
-                "\nRich library not available. Skipping interactive spoofing configuration.",
-                "warning",
-            )
-            return False  # No changes made if Rich is not available
-
-        self.console.print("\n" + "=" * 80, style="bold cyan")
-        self.console.print(
-            f"🧬 ADVANCED SPOOFING CONFIGURATION ({SCRIPT_VERSION})",
-            style="bold magenta",
-            justify="center",
-        )
-        self.console.print("=" * 80, style="bold cyan")
-
-        made_changes_in_session = False
-
-        # Initial display of the table
-        # No live update for table itself, but re-display after each action
-        self._display_spoofing_table()
-
+        
+        options = self._get_spoofing_options_map()
+        
+        # Create table for display
+        table = Table(title="🔧 Advanced Spoofing Configuration", box=box.ROUNDED)
+        table.add_column("ID", style="cyan", width=3)
+        table.add_column("Category", style="magenta", width=12)
+        table.add_column("Description", style="green", width=30)
+        table.add_column("Current", style="yellow", width=8)
+        table.add_column("Notes", style="dim", width=25)
+        
+        for option_tuple in options:
+            option_id, category, description, config_section, config_key, value_type, notes = option_tuple
+            current_value = self.config.get(config_section, config_key, fallback="false" if value_type == "bool" else "")
+            
+            if value_type == "bool":
+                current_display = "✓" if current_value.lower() == "true" else "✗"
+            else:
+                current_display = current_value[:8] + "..." if len(current_value) > 8 else current_value
+            
+            table.add_row(option_id, category, description, current_display, notes)
+        
+        self.console.print(table)
+        self.console.print("\n[bold]Configuration Options:[/bold]")
+        self.console.print("• [cyan]all[/cyan] - Configure all options interactively")
+        self.console.print("• [cyan]<number>[/cyan] - Configure specific option")
+        self.console.print("• [cyan]quit[/cyan] - Exit configuration menu")
+        
         while True:
-            self.console.print(
-                Text.from_markup(
-                    "\n[bold cyan]Choose action:[/bold cyan] "
-                    "[1]Toggle Option, [2]Set Value, [3]View Help, "
-                    "[4]Save & Continue, [5]Continue without Saving, [0]Back to Main Menu (discard changes)"
-                )
-            )
-            action_choice = Prompt.ask(
-                "Enter choice (0-5)",
-                choices=["0", "1", "2", "3", "4", "5"],
-                default="5",
-                console=self.console,
-            ).strip()
-
-            action_taken_this_loop = False
-            if action_choice == "1":  # Toggle Option
-                if self._interactive_toggle_interface():
-                    made_changes_in_session = True
-                    action_taken_this_loop = True
-            elif action_choice == "2":  # Set Value
-                if self._interactive_set_value_interface():
-                    made_changes_in_session = True
-                    action_taken_this_loop = True
-            elif action_choice == "3":  # View Help
-                self._show_spoofing_help()
-                # No need to redisplay table just for help
-            elif action_choice == "4":  # Save & Continue
-                if made_changes_in_session:
-                    if self._save_spoofing_config():
-                        self._log_message(
-                            "Configuration applied for this session.", "info"
-                        )
-                    else:  # Save failed
-                        self._log_message(
-                            "Save failed. Changes might not persist.", "error"
-                        )
-                else:
-                    self.console.print("No changes were made to save.", style="dim")
-                return made_changes_in_session  # Return whether changes were made and saved/attempted
-            elif action_choice == "5":  # Continue without Saving
-                if made_changes_in_session:
-                    if Confirm.ask(
-                        Text.from_markup(
-                            "[yellow]You have unsaved changes. Continue without saving them to config.ini?[/yellow] "
-                            "(Changes will still apply to current session if not discarded)"
-                        ),
-                        default=False,
-                        console=self.console,
-                    ):
-                        self._log_message(
-                            "Continuing with current session changes (not saved to file).",
-                            "info",
-                        )
-                        return made_changes_in_session  # Changes made, but not saved to file
-                    else:
-                        continue  # Go back to action choice
-                else:  # No changes, just continue
-                    self._log_message(
-                        "Continuing with no changes to spoofing config.", "dim"
-                    )
-                    return False  # No changes made
-            elif action_choice == "0":  # Back to Main Menu (discard changes)
-                if made_changes_in_session:
-                    if Confirm.ask(
-                        Text.from_markup(
-                            "[bold red]Discard all spoofing changes made in this configuration screen and return to main menu?[/bold red]"
-                        ),
-                        default=False,
-                        console=self.console,
-                    ):
-                        self.load_config()  # Reload original config to discard in-memory changes
-                        self._log_message(
-                            "Spoofing changes discarded. Reloaded from config.ini.",
-                            "info",
-                        )
-                        return (
-                            False  # No *effective* changes made as they were discarded
-                        )
-                    else:
-                        continue  # Go back to action choice
-                else:  # No changes, just go back
-                    return False
-
-            if action_taken_this_loop:  # If a toggle or set value happened
-                self._display_spoofing_table()  # Re-display the table with new values
-
-        # Fallback, should be handled by choices above
-        return made_changes_in_session
-
-    def phone_management_tools_menu(self):
-        if not RICH_AVAILABLE or not self.console:
-            self._log_message("Phone Management Tools require Rich library.", "warning")
-            return
-
-        self.console.print("\n" + "=" * 60, style="bold green")
-        self.console.print(
-            "🛠️ Phone Management Tools", style="bold green", justify="center"
-        )
-        self.console.print("=" * 60, style="bold green")
-
-        menu_options = {
-            "1": "Set Device Clipboard (PC to Android)",
-            "0": "Back to Main Menu",
-        }
-
-        while True:
-            self.console.print("\nAvailable tools:")
-            for key, value in menu_options.items():
-                self.console.print(f"  [{key}] {value}")
-
             choice = Prompt.ask(
-                "Select tool",
-                choices=list(menu_options.keys()),
-                default="0",
-                console=self.console,
-            )
+                "\nEnter option (all/number/quit)",
+                default="quit",
+                console=self.console
+            ).strip().lower()
+            
+            if choice == "quit":
+                return True
+            elif choice == "all":
+                config_changes = self._collect_config_values_from_options(options)
+                self._apply_config_changes(config_changes)
+                self._log_message("✓ Configuration updated successfully", "success")
+                return True
+            else:
+                try:
+                    option_num = int(choice)
+                    selected_option = None
+                    for option_tuple in options:
+                        if option_tuple[0] == str(option_num):
+                            selected_option = option_tuple
+                            break
+                    
+                    if selected_option:
+                        config_changes = self._collect_config_values_from_options([selected_option])
+                        self._apply_config_changes(config_changes)
+                        self._log_message(f"✓ Option {option_num} configured successfully", "success")
+                    else:
+                        self._log_message(f"Invalid option number: {option_num}", "error")
+                except ValueError:
+                    self._log_message(f"Invalid input: {choice}", "error")
 
+    def _apply_config_changes(self, config_changes):
+        """Apply configuration changes to the config object."""
+        for full_key, value in config_changes.items():
+            section, key = full_key.split(".", 1)
+            if not self.config.has_section(section):
+                self.config.add_section(section)
+            self.config.set(section, key, value)
+
+    def _show_phone_management_tools_menu(self):
+        """Display phone management tools menu."""
+        if not self.console:
+            self._log_message("Phone management tools require Rich console interface", "error")
+            return False
+        
+        while True:
+            self.console.print("\n[bold cyan]📱 Phone Management Tools[/bold cyan]")
+            self.console.print("1. Set Device Clipboard")
+            self.console.print("2. Enable Clipboard Service")
+            self.console.print("3. Manage User Profiles")
+            self.console.print("4. Back to Main Menu")
+            
+            choice = Prompt.ask(
+                "Select option",
+                choices=["1", "2", "3", "4"],
+                default="4",
+                console=self.console
+            )
+            
             if choice == "1":
                 self._set_device_clipboard_tool()
-            elif choice == "0":
+            elif choice == "2":
+                self._enable_clipboard_service_tool()
+            elif choice == "3":
+                self._manage_user_profiles_tool()
+            elif choice == "4":
                 break
-            self.console.rule(style="dim green")  # Separator after tool usage
 
     def _set_device_clipboard_tool(self):
-        self.console.print(
-            "\n📋 Set Device Clipboard (PC Text to Android Clipboard)",
-            style="bold yellow",
-        )
-        self.console.print(
-            "This tool attempts to set the Android device's clipboard content using text you provide.",
-            style="dim",
-        )
-        self.console.print(
-            "Requires: [bold]Root access[/bold] on the device and [bold]Android 9 (Pie, SDK 28)[/bold] or newer.",
-            style="dim",
-        )
-
-        connected_devices = self.get_connected_devices()
-        if not connected_devices:
-            self._log_message("No devices found to set clipboard on.", "warning")
+        """Tool to set text on device clipboard.
+        
+        NOTE: This feature requires either:
+        1. A third-party clipboard app like 'Clipper' (uses 'am broadcast -a clipper.set')
+        2. Android 10+ with appropriate permissions for clipboard access
+        
+        Standard Android does not provide direct clipboard access via ADB.
+        """
+        self._log_message("⚠️  IMPORTANT: This clipboard feature requires a third-party app like 'Clipper' to be installed on the device.", "warning")
+        self._log_message("Standard Android does not allow direct clipboard access via ADB commands.", "warning")
+        
+        if not Confirm.ask("Do you want to continue anyway?", default=False, console=self.console):
             return
-
-        selected_devices = self.select_devices(connected_devices)
-        if not selected_devices:
-            self._log_message("No device selected for clipboard operation.", "yellow")
+        
+        devices = self.get_connected_devices()
+        if not devices:
+            self._log_message("No connected devices found", "error")
             return
-
-        device_to_use = selected_devices[
-            0
-        ]  # Use the first selected device for this tool
-        device_id = device_to_use["id"]
-        self._log_message(
-            f"Selected device for clipboard: {device_id} - {device_to_use['info']}",
-            "info",
-        )
-
-        # Check capabilities (root and SDK version)
-        caps = self.device_capabilities.get(
-            device_id
-        ) or self.spoofing_manager.detect_capabilities(device_id)
-        if not caps.get("root_access"):
-            self._log_message(
-                f"Device {device_id} does not have root access. Cannot set clipboard.",
-                "error",
-            )
+        
+        selected_device = self.select_devices(devices)
+        if not selected_device:
             return
-        if caps.get("android_sdk_version", 0) < 28:  # Android P is SDK 28
-            self._log_message(
-                f"Device {device_id} is Android SDK {caps.get('android_sdk_version')}. Needs SDK 28 (Android 9 Pie) or newer for `cmd clipboard set-text`.",
-                "error",
-            )
+        
+        device_id = selected_device[0]["id"]
+        
+        text = Prompt.ask(
+            "Enter text to set on device clipboard",
+            console=self.console
+        )
+        
+        if not text:
             return
-
-        self.console.print(
-            "\nEnter the text you want to copy to the Android device's clipboard."
-        )
-        self.console.print(
-            "Press [Ctrl+D] (Linux/macOS) or [Ctrl+Z then Enter] (Windows) on a new line when done, or just Enter for a single line.",
-            style="dim",
-        )
-
-        lines = []
+        
         try:
-            while True:
-                line = self.console.input("> ")
-                lines.append(line)
-        except EOFError:  # Ctrl+D or Ctrl+Z
-            pass
-        except KeyboardInterrupt:
-            self.console.print("\nClipboard input cancelled.", style="yellow")
-            return
-
-        text_to_set = "\n".join(lines)
-        if not text_to_set.strip():
-            self._log_message("No text provided to set to clipboard.", "warning")
-            return
-
-        self._log_message(
-            f'Attempting to set clipboard on {device_id} with text: "{text_to_set[:50]}{"..." if len(text_to_set) > 50 else ""}"',
-            "info",
-        )
-
-        # The command is: `cmd clipboard set-text '<text>'`
-        # Text needs to be properly quoted for the shell, especially if it contains special characters or newlines.
-        # `shlex.quote` is good for this.
-        quoted_text_for_shell = shlex.quote(text_to_set)
-
-        # Construct the command list for _run_adb_shell_command
-        # The `su -c "cmd clipboard set-text 'escaped_text'"` structure
-        clipboard_command_str = f"cmd clipboard set-text {quoted_text_for_shell}"
-
-        # We need to run `cmd clipboard set-text` as root to allow setting clipboard from shell.
-        # The actual user context for clipboard is usually current foreground user.
-        # `su 0 -c "..."` should work.
-
-        result = self.spoofing_manager._run_adb_shell_command(
-            device_id, clipboard_command_str, as_root=True, timeout=15
-        )
-
-        if result.returncode == 0:
-            # Some devices output nothing on success, others might.
-            # Verification by getting clipboard is possible but more complex due to permissions.
-            self._log_message(
-                f"✅ Clipboard set successfully on {device_id}. You can now try pasting on the device.",
-                "success",
+            # Try standard clipboard service first (Android 10+)
+            std_cmd = ["cmd", "clipboard", "put", text]
+            result = self.spoofing_manager._run_adb_shell_command(
+                device_id, std_cmd, timeout=10
             )
-            if result.stdout.strip():
-                self._log_message(
-                    f"   Output: {result.stdout.strip()}", "debug", dim_style=True
-                )
-        else:
-            error_output = (
-                result.stderr.strip()
-                or result.stdout.strip()
-                or "Unknown error from `cmd clipboard`"
-            ).splitlines()[0]
-            self._log_message(
-                f"❌ Failed to set clipboard on {device_id}: {error_output}", "error"
+            
+            if result and result.returncode == 0:
+                self._log_message(f"✓ Clipboard set on device {device_id} (standard method)", "success")
+                return
+            
+            # Fallback to third-party clipper app
+            self._log_message("Standard clipboard method failed, trying third-party 'Clipper' app...", "info")
+            
+            clipper_cmd = [
+                "am", "broadcast",
+                "-a", "clipper.set",
+                "-e", "text", text
+            ]
+            
+            result = self.spoofing_manager._run_adb_shell_command(
+                device_id, clipper_cmd, timeout=10
             )
-            if "unknown command 'clipboard'" in error_output.lower():
-                self._log_message(
-                    "   This might mean the `clipboard` service command is not available on this Android version/ROM, or requires a different syntax.",
-                    "info",
+            
+            if result and result.returncode == 0:
+                self._log_message(f"✓ Clipboard set on device {device_id} (Clipper app)", "success")
+            else:
+                self._log_message(f"✗ Failed to set clipboard on device {device_id}. Make sure 'Clipper' app is installed.", "error")
+                self._log_message("Install from: https://play.google.com/store/apps/details?id=dk.mathiasfranz.clipper", "info")
+                
+        except Exception as e:
+            self._log_message(f"✗ Error setting clipboard: {str(e)}", "error")
+
+    def _enable_clipboard_service_tool(self):
+        """Tool to attempt enabling clipboard service on device.
+        
+        NOTE: The 'clipboard_service_enabled' setting is not a standard Android setting.
+        This function will try several approaches to enable clipboard functionality.
+        """
+        self._log_message("⚠️  IMPORTANT: Standard Android does not have a 'clipboard_service_enabled' setting.", "warning")
+        self._log_message("This tool will attempt various methods to enable clipboard functionality.", "warning")
+        
+        devices = self.get_connected_devices()
+        if not devices:
+            self._log_message("No connected devices found", "error")
+            return
+        
+        selected_device = self.select_devices(devices)
+        if not selected_device:
+            return
+        
+        device_id = selected_device[0]["id"]
+        
+        try:
+            # Check Android version first
+            version_result = self.spoofing_manager._run_adb_shell_command(
+                device_id, ["getprop", "ro.build.version.sdk"], timeout=5
+            )
+            
+            sdk_version = 0
+            if version_result and version_result.returncode == 0:
+                try:
+                    sdk_version = int(version_result.stdout.strip())
+                except ValueError:
+                    pass
+            
+            self._log_message(f"Device Android SDK version: {sdk_version}", "info")
+            
+            if sdk_version >= 29:  # Android 10+
+                self._log_message("Android 10+ detected. Clipboard access should work via 'cmd clipboard' commands.", "success")
+                
+                # Test if clipboard service is available
+                test_result = self.spoofing_manager._run_adb_shell_command(
+                    device_id, ["cmd", "clipboard", "get"], timeout=5
                 )
+                
+                if test_result and test_result.returncode == 0:
+                    self._log_message("✓ Clipboard service is already working on this device", "success")
+                else:
+                    self._log_message("⚠️  Clipboard service test failed. This may be due to device restrictions.", "warning")
+            else:
+                self._log_message(f"Android {sdk_version} detected. Native clipboard access not available via ADB.", "warning")
+                self._log_message("Consider installing a third-party clipboard app like 'Clipper'.", "info")
+            
+            # Try the non-standard setting anyway (in case it's a custom ROM)
+            self._log_message("Attempting to set non-standard clipboard_service_enabled setting...", "info")
+            
+            custom_cmd = [
+                "settings", "put", "secure",
+                "clipboard_service_enabled", "1"
+            ]
+            
+            result = self.spoofing_manager._run_adb_shell_command(
+                device_id, custom_cmd, timeout=10
+            )
+            
+            if result and result.returncode == 0:
+                self._log_message(f"✓ Non-standard clipboard setting applied on device {device_id}", "success")
+                self._log_message("Note: This setting may not have any effect on standard Android.", "warning")
+            else:
+                self._log_message(f"✗ Failed to apply non-standard clipboard setting", "error")
+                
+        except Exception as e:
+            self._log_message(f"✗ Error checking clipboard service: {str(e)}", "error")
+
+    def _manage_user_profiles_tool(self):
+        """Tool to manage user profiles on device."""
+        devices = self.get_connected_devices()
+        if not devices:
+            self._log_message("No connected devices found", "error")
+            return
+        
+        selected_device = self.select_devices(devices)
+        if not selected_device:
+            return
+        
+        device_id = selected_device[0]["id"]
+        
+        try:
+            # Get list of users
+            result = self.spoofing_manager._run_adb_shell_command(
+                device_id, ["pm", "list", "users"], timeout=10
+            )
+            
+            if not result or result.returncode != 0:
+                self._log_message("Failed to get user list", "error")
+                return
+            
+            users = []
+            for line in result.stdout.splitlines():
+                if "UserInfo{" in line:
+                    # Parse user info
+                    user_match = re.search(r'UserInfo\{(\d+):([^:]+):', line)
+                    if user_match:
+                        user_id = user_match.group(1)
+                        user_name = user_match.group(2)
+                        is_owner = "FLAG_PRIMARY" in line
+                        users.append({
+                            "id": user_id,
+                            "name": user_name,
+                            "is_owner": is_owner
+                        })
+            
+            if not users:
+                self._log_message("No users found", "error")
+                return
+            
+            # Display users
+            table = Table(title=f"User Profiles on {device_id}", box=box.ROUNDED)
+            table.add_column("ID", style="cyan")
+            table.add_column("Name", style="green")
+            table.add_column("Type", style="yellow")
+            
+            for user in users:
+                user_type = "Owner" if user["is_owner"] else "Profile"
+                table.add_row(user["id"], user["name"], user_type)
+            
+            self.console.print(table)
+            
+            # Ask which users to remove
+            removable_users = [u for u in users if not u["is_owner"]]
+            if not removable_users:
+                self._log_message("No removable user profiles found", "info")
+                return
+            
+            user_choices = []
+            for user in removable_users:
+                if questionary and QUESTIONARY_AVAILABLE:
+                    user_choices.append(questionary.Choice(
+                        title=f"{user['name']} (ID: {user['id']})",
+                        value=user['id']
+                    ))
+            
+            if questionary and QUESTIONARY_AVAILABLE:
+                selected_users = questionary.checkbox(
+                    "Select users to remove:",
+                    choices=user_choices
+                ).ask()
+                
+                if selected_users:
+                    confirm = Confirm.ask(
+                        f"Remove {len(selected_users)} user profile(s)?",
+                        default=False,
+                        console=self.console
+                    )
+                    
+                    if confirm:
+                        for user_id in selected_users:
+                            remove_result = self.spoofing_manager._run_adb_shell_command(
+                                device_id, ["pm", "remove-user", user_id], timeout=30
+                            )
+                            
+                            if remove_result and remove_result.returncode == 0:
+                                self._log_message(f"✓ Removed user profile {user_id}", "success")
+                            else:
+                                self._log_message(f"✗ Failed to remove user profile {user_id}", "error")
+            
+        except Exception as e:
+            self._log_message(f"✗ Error managing user profiles: {str(e)}", "error")
+
+    def _show_spoofing_configuration_menu(self):
+        """Show the spoofing configuration menu."""
+        return self._display_configuration_menu()
+
+    def _show_main_menu(self):
+        """Display main menu and handle user selection."""
+        if not self.console:
+            return "1"  # Default to APK installation for non-interactive mode
+        
+        self.console.print("\n[bold cyan]🚀 Main Menu[/bold cyan]")
+        self.console.print("1. Install APK/XAPK Files")
+        self.console.print("2. Configure Spoofing Settings")
+        self.console.print("3. Phone Management Tools")
+        self.console.print("4. Exit")
+        
+        choice = Prompt.ask(
+            "Select option",
+            choices=["1", "2", "3", "4"],
+            default="1",
+            console=self.console
+        )
+        
+        return choice
 
     def run(self):
-        keep_running_main_loop, overall_success_status = True, False
-
-        while keep_running_main_loop:
-            self.errors, self.successes = (
-                [],
-                [],
-            )  # Reset errors/successes for each new session
-
-            # Initial cleanup from previous iteration if any active users exist
-            if self.spoofing_manager:
-                active_users_to_clean = list(
-                    self.spoofing_manager.active_spoofed_users.keys()
-                )
-                cleanup_on_new_session = self.config.getboolean(
-                    "UNIQUENESS", "cleanup_user_profile_after_session", fallback=True
-                )
-                if active_users_to_clean and cleanup_on_new_session:
-                    self._log_message(
-                        "\n--- Cleaning up active spoofed users from previous iteration ---",
-                        "debug",
-                        dim_style=True,
-                    )
-                    for dev_id_cleanup_iter in active_users_to_clean:
-                        # Comprehensive cleanup also restores properties and user limits if bypass was used
-                        # Don't prompt user for previous iteration cleanup - use config defaults
-                        self.spoofing_manager.comprehensive_cleanup(dev_id_cleanup_iter, prompt_user=False)
-
-            self.cleanup_temp_files()  # Clean temp files from previous run/iteration
+        """Main application loop."""
+        while True:
             self.print_banner()
-
-            # Load configuration at the start of each loop to pick up external changes or apply defaults
+            
+            if not self.verify_adb():
+                self._log_message("ADB verification failed", "error")
+                if not self.ask_restart():
+                    break
+                continue
+            
+            # Load configuration
             self.load_config()
-            if any("CRITICAL" in e for e in self.errors):  # Critical config load error
-                self.show_summary(0, 0)  # Show errors from config load
-                keep_running_main_loop = self.ask_restart()
-                continue
-
-            if not self.verify_adb():  # Verify ADB is working
-                self.show_summary(0, 0)  # Shows ADB error
-                keep_running_main_loop = self.ask_restart()
-                continue
-
-            # --- Main Menu ---
-            self.console.print(
-                "\n" + "=" * 30 + " MAIN MENU " + "=" * 30, style="bold magenta"
-            )
-            main_menu_actions = {
-                "1": "APK/XAPK/APKM Installation",
-                "2": "Configure Advanced Spoofing",
-                "3": "Phone Management Tools",
-                "0": "Exit Installer",
-            }
-            for key, desc in main_menu_actions.items():
-                self.console.print(f"  [{key}] {desc}")
-
-            main_choice = Prompt.ask(
-                "Select action",
-                choices=list(main_menu_actions.keys()),
-                default="1",
-                console=self.console,
-            )
-            self.console.rule(style="magenta")
-
-            if main_choice == "0":  # Exit
-                keep_running_main_loop = False
-                continue
-            elif main_choice == "2":  # Configure Spoofing
-                if (
-                    self.configure_spoofing_options()
-                ):  # Returns true if changes were made (saved or not)
-                    # If changes were made (and potentially saved), reload config to ensure current session uses them
-                    self.load_config()
-                continue  # Go back to main menu
-            elif main_choice == "3":  # Phone Management Tools
-                self.phone_management_tools_menu()
-                continue  # Go back to main menu
-
-            # --- Proceed with APK Installation (main_choice == "1") ---
-            # (Capability scan might happen here or be part of get_connected_devices)
-            # Ensure device_capabilities is fresh or populated before device selection
-            self.device_capabilities.clear()  # Clear old caps before re-scanning devices for this session
-
-            devices_found_list = self.get_connected_devices()  # Scans and displays caps
-            if not devices_found_list:
-                self.show_summary(0, 0)  # Shows device error
-                # keep_running_main_loop = self.ask_restart() # ask_restart is at the end of outer loop
-                continue  # Go back to main menu to allow re-scan or exit
-
-            apk_files_found_list = self.find_apk_files()
-            if not apk_files_found_list:
-                self.show_summary(0, 0)  # Shows no files error
-                continue
-
-            selected_devices_for_install = self.select_devices(devices_found_list)
-            if not selected_devices_for_install:
-                self._log_message("No devices selected for installation.", "yellow")
-                continue
-
-            selected_files_for_install = self.select_apks(apk_files_found_list)
-            if not selected_files_for_install:
-                self._log_message("No files selected for installation.", "yellow")
-                continue
-
-            if not self.confirm_installation(
-                selected_devices_for_install, selected_files_for_install
-            ):
-                self._log_message("Installation cancelled by user.", "yellow")
-                continue
-
-            # --- Perform Installation ---
-            session_successful_ops, session_total_ops = 0, 0
-            try:
-                session_successful_ops, session_total_ops = self.install_selected_apks(
-                    selected_devices_for_install, selected_files_for_install
-                )
-                if (
-                    session_successful_ops > 0 and not self.errors
-                ):  # If any success and no new errors from install phase
-                    overall_success_status = True
-            except Exception as e_install_phase:
-                critical_error_msg = f"CRITICAL UNHANDLED ERROR during installation phase: {e_install_phase}"
-                self.errors.append(critical_error_msg)
-                self._log_message(f"💥 {critical_error_msg}", "bold red")
-                if self.console:
-                    self.console.print_exception(show_locals=True, max_frames=10)
-                else:
-                    import traceback
-
-                    traceback.print_exc()
-            finally:
-                self.show_summary(session_successful_ops, session_total_ops)
-
-            # Ask to restart for another session (only if installation was attempted)
+            
+            # Show main menu
+            choice = self._show_main_menu()
+            
+            if choice == "1":
+                # APK Installation
+                self._run_installation_workflow()
+            elif choice == "2":
+                # Spoofing Configuration
+                self._show_spoofing_configuration_menu()
+            elif choice == "3":
+                # Phone Management Tools
+                self._show_phone_management_tools_menu()
+            elif choice == "4":
+                # Exit
+                break
+            
             if not self.ask_restart():
-                keep_running_main_loop = False
+                break
+        
+        self.cleanup_temp_files()
+        self._log_message("Application closed", "info")
 
-        # --- End of main loop (keep_running_main_loop is false) ---
-        # Final cleanup for any persistent spoofing or users if applicable
-        if self.spoofing_manager:
-            self._log_message(
-                "\n--- Performing Final Session Cleanup for ALL Touched Devices ---",
-                "bold cyan",
-            )
-            # Collect all device IDs that might have had spoofing applied or users created
-            all_devices_potentially_affected = (
-                set(self.spoofing_manager.property_backups.keys())
-                | set(self.spoofing_manager.user_limit_originals.keys())
-                | set(self.spoofing_manager.active_spoofed_users.keys())
-                | set(self.device_capabilities.keys())
-            )  # Include all scanned devices too
+    def _run_installation_workflow(self):
+        """Run the APK installation workflow."""
+        devices = self.get_connected_devices()
+        if not devices:
+            self._log_message("No connected devices found", "error")
+            return
+        
+        files = self.find_apk_files()
+        if not files:
+            self._log_message("No APK files found", "error")
+            return
+        
+        selected_devices = self.select_devices(devices)
+        if not selected_devices:
+            return
+        
+        selected_files = self.select_apks(files)
+        if not selected_files:
+            return
+        
+        if not self.confirm_installation(selected_devices, selected_files):
+            return
+        
+        successful, failed = self.install_selected_apks(selected_devices, selected_files)
+        self.show_summary(successful, successful + failed)
+        
+        # Cleanup
+        for device in selected_devices:
+            if self.spoofing_manager:
+                self.spoofing_manager.comprehensive_cleanup(device["id"], prompt_user=True)
 
-            for dev_id_final_clean in all_devices_potentially_affected:
-                # Prompt user for final cleanup - let them choose what to restore
-                self.spoofing_manager.comprehensive_cleanup(dev_id_final_clean, prompt_user=True)
 
-        self.cleanup_temp_files()  # Final temp file cleanup
-        return overall_success_status  # True if at least one install session had some success
-
-
-def install_dependency(package_name, console_instance=None):
-    """Installs a single dependency using pip."""
-    msg = f"Attempting to install [cyan]{package_name}[/cyan]..."
-    if console_instance: console_instance.print(msg, style="yellow")
-    else: print(re.sub(r'\[/?\w+.*?\]', '', msg))
-    try:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "--user", package_name])
-        msg_ok = f"✓ Successfully installed [cyan]{package_name}[/cyan]."
-        if console_instance: console_instance.print(msg_ok, style="green")
-        else: print(re.sub(r'\[/?\w+.*?\]', '', msg_ok))
-        return True
-    except subprocess.CalledProcessError as e:
-        msg_fail = f"✗ Failed to install [cyan]{package_name}[/cyan]. Please install it manually: [bold]pip install {package_name}[/bold]. Error: {e}"
-        if console_instance: console_instance.print(msg_fail, style="red")
-        else: print(re.sub(r'\[/?\w+.*?\]', '', msg_fail))
-        return False
 
 def check_and_install_dependencies():
-    """Checks for required libraries and prompts to install them if missing."""
-    missing = [pkg for pkg, available in [("rich", RICH_AVAILABLE), ("pyaxmlparser", PYAXMLPARSER_AVAILABLE), ("questionary", QUESTIONARY_AVAILABLE)] if not available]
-    if not missing: return True
+    """Check for and install required dependencies."""
+    dependencies = [
+        ("rich", "rich"),
+        ("pyaxmlparser", "pyaxmlparser"),
+        ("questionary", "questionary")
+    ]
+    
+    missing_deps = []
+    
+    for import_name, package_name in dependencies:
+        try:
+            __import__(import_name)
+        except ImportError:
+            missing_deps.append(package_name)
+    
+    if missing_deps:
+        print("Missing dependencies detected. Installing:")
+        for dep in missing_deps:
+            print(f"  - {dep}")
+        
+        try:
+            import subprocess
+            import sys
+            
+            for dep in missing_deps:
+                print(f"Installing {dep}...")
+                result = subprocess.run([sys.executable, "-m", "pip", "install", dep], 
+                                      capture_output=True, text=True)
+                if result.returncode != 0:
+                    print(f"Failed to install {dep}: {result.stderr}")
+                    return False
+                else:
+                    print(f"✓ {dep} installed successfully")
+            
+            print("All dependencies installed successfully!")
+            return True
+            
+        except Exception as e:
+            print(f"Error installing dependencies: {e}")
+            return False
+    
+    return True
 
-    console = Console(stderr=True) if RICH_AVAILABLE else None
-
-    if console:
-        console.print(Panel(Text.from_markup(f"This script requires missing package(s) for full functionality:\n[bold yellow]{', '.join(missing)}[/bold yellow]"), title="[yellow]Missing Dependencies[/yellow]"))
-        if not Confirm.ask("Attempt automatic installation now?", default=True, console=console):
-            console.print("Installation skipped. The script may not run correctly.", style="dim"); return False
-    else:
-        if input(f"Missing dependencies: {', '.join(missing)}. Install now? (y/n): ").lower() != 'y':
-            print("Installation skipped."); return False
-
-    all_installed = all(install_dependency(dep, console) for dep in missing)
-    if all_installed:
-        msg_restart = "\n[green]Dependencies installed.[/green] Please restart the script for changes to take effect."
-        if console: console.print(Text.from_markup(msg_restart))
-        else: print(re.sub(r'\[/?\w+.*?\]', '', msg_restart))
-        sys.exit(0)
-    else:
-        sys.exit(1)
 
 def main():
-    check_and_install_dependencies()
+    """Main entry point of the application."""
+    if not check_and_install_dependencies():
+        return 1
     
-    # Re-check availability after potential installation and restart prompt.
-    # The script exits if installation happens, so this check is for when user skips install.
-    if not RICH_AVAILABLE:
-        print("Rich library not found. UI will be basic. Install with: pip install rich")
-    if not PYAXMLPARSER_AVAILABLE:
-        print("Warning: pyaxmlparser not found. APK package name parsing might be limited. Install with: pip install pyaxmlparser")
-    if not QUESTIONARY_AVAILABLE:
-        print("Warning: questionary not found. Interactive selection menus will not be available. Install with: pip install questionary")
-
-    installer_instance = InteractiveAPKInstaller()
-    final_outcome_success = False
+    installer = InteractiveAPKInstaller()
     try:
-        final_outcome_success = (
-            installer_instance.run()
-        )  # run() returns true if any session was successful
+        installer.run()
+        return 0
     except KeyboardInterrupt:
-        if installer_instance.console:
-            installer_instance.console.print(
-                "\n\n⚠️ Program interrupted by user (Ctrl+C). Performing cleanup...",
-                style="yellow",
-            )
+        if installer.console: 
+            installer.console.print("\\nProgram interrupted.", "yellow")
         else:
-            print("\n\n⚠️ Program interrupted by user (Ctrl+C). Performing cleanup...")
-        final_outcome_success = False  # Interruption is not success
-    except Exception as e_global:  # Catch any truly unhandled global exceptions
-        if installer_instance.console:
-            installer_instance.console.print(
-                f"\n💥 UNEXPECTED CRITICAL ERROR (GLOBAL): {e_global}", style="bold red"
-            )
-            installer_instance.console.print_exception(show_locals=True, max_frames=10)
+            print("\\nProgram interrupted.")
+        return 1
+    except Exception as e:
+        if installer.console:
+            installer.console.print(f"Error: {e}", "red")
         else:
-            print(f"\n💥 UNEXPECTED CRITICAL ERROR (GLOBAL): {e_global}")
-            import traceback
-
-            traceback.print_exc()
-        final_outcome_success = False
+            print(f"Error: {e}")
+        return 1
     finally:
-        # Ensure final cleanup runs even after exceptions in run() or KeyboardInterrupt
-        if installer_instance.spoofing_manager:
-            if installer_instance.console:
-                installer_instance.console.print(
-                    "\n--- Ensuring Final Cleanup (main exception handler for all devices) ---",
-                    "bold cyan",
-                )
-
-            all_devices_final_pass = (
-                set(installer_instance.spoofing_manager.property_backups.keys())
-                | set(installer_instance.spoofing_manager.user_limit_originals.keys())
-                | set(installer_instance.spoofing_manager.active_spoofed_users.keys())
-                | set(installer_instance.device_capabilities.keys())
-            )  # From all scanned devices
-
-            for dev_id_ultimate_cleanup in all_devices_final_pass:
-                # Emergency cleanup - don't prompt user during exception handling
-                installer_instance.spoofing_manager.comprehensive_cleanup(
-                    dev_id_ultimate_cleanup, prompt_user=False
-                )
-
-        installer_instance.cleanup_temp_files()
-
-    # Final exit message
-    exit_message_panel_title = "🚀 APK Installer Session Ended"
-    exit_message_text = (
-        f"Thank you for using Professional APK Installer {SCRIPT_VERSION}!"
-    )
-    if installer_instance.console:
-        installer_instance.console.print("\n" + "=" * 80, style="blue")
-        installer_instance.console.print(
-            Panel(
-                Text(exit_message_text, justify="center", style="dim"),
-                title=exit_message_panel_title,
-                border_style="blue",
-                padding=1,
-            )
-        )
-        installer_instance.console.print("=" * 80, style="blue")
-    else:
-        print(
-            "\n"
-            + "=" * 80
-            + f"\n           {exit_message_panel_title}\n    {exit_message_text}\n"
-            + "=" * 80
-        )
-
-    if sys.stdin.isatty():  # If run in an interactive terminal (not piped)
-        try:
-            input("\nPress Enter to close this window...")
-        except KeyboardInterrupt:
-            pass  # Allow Ctrl+C to exit prompt too
-
-    return (
-        0 if final_outcome_success else 1
-    )  # Exit code 0 for success, 1 for failure/errors
+        installer.cleanup_temp_files()
+        if installer.console:
+            if sys.stdin.isatty(): 
+                input("\\nPress Enter to exit.")
 
 
 if __name__ == "__main__":
-    # Ensure device_patterns.json exists or create a default one
-    if not Path(DEVICE_PATTERNS_FILE).exists():
-        try:
-            # Create a temporary manager instance just to access its default pattern generation
-            # Use a minimal config for this temporary instance.
-            temp_cfg_for_patterns = configparser.ConfigParser()
-            temp_cfg_for_patterns.add_section("ADVANCED_SPOOFING")  # Needs this section
-            temp_cfg_for_patterns.set(
-                "ADVANCED_SPOOFING", "backup_original_properties", "false"
-            )  # Don't need backup for this
-            temp_manager_for_patterns = DeviceSpoofingManager(
-                config=temp_cfg_for_patterns
-            )  # No console needed
-
-            # Get the default patterns data structure
-            default_patterns_to_write = {
-                "manufacturers": temp_manager_for_patterns._get_default_manufacturers_patterns(),
-                "android_versions": temp_manager_for_patterns._get_default_android_version_release_map(),
-                "build_fingerprint_format": temp_manager_for_patterns.patterns_data.get(
-                    "build_fingerprint_format",
-                    "{brand}/{product}/{device}:{android_version_release}/{build_id}/{incremental}:user/release-keys",
-                ),
-                "props_to_spoof": list(
-                    temp_manager_for_patterns.COMPREHENSIVE_DEFAULT_PROPS_TO_SPOOF
-                ),
-                "common_build_tags": temp_manager_for_patterns.patterns_data.get(
-                    "common_build_tags", "release-keys"
-                ),
-                "common_build_type": temp_manager_for_patterns.patterns_data.get(
-                    "common_build_type", "user"
-                ),
-            }
-            with open(
-                DEVICE_PATTERNS_FILE, "w", encoding="utf-8"
-            ) as f_json_default_patterns:
-                json.dump(default_patterns_to_write, f_json_default_patterns, indent=2)
-
-            msg_created_patterns_file = f"Created default '{DEVICE_PATTERNS_FILE}'. You can customize it with more device details or delete it to ensure comprehensive internal defaults are used on next run."
-            # Use a temporary console for this pre-main message if rich is available
-            temp_console_for_msg = Console(stderr=True) if RICH_AVAILABLE else None
-            if temp_console_for_msg:
-                temp_console_for_msg.print(msg_created_patterns_file, style="dim green")
-            else:
-                print(msg_created_patterns_file)
-        except Exception as e_create_patterns:
-            msg_err_patterns_file = f"Could not create default '{DEVICE_PATTERNS_FILE}': {e_create_patterns}. The script will use internal defaults."
-            temp_console_for_err = Console(stderr=True) if RICH_AVAILABLE else None
-            if temp_console_for_err:
-                temp_console_for_err.print(msg_err_patterns_file, style="yellow")
-            else:
-                print(msg_err_patterns_file)
-
+    sys.exit(main())

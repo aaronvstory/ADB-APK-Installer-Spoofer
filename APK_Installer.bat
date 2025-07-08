@@ -10,12 +10,13 @@ set "CONFIG_FILE=%BATCH_DIR%config.ini"
 :: Display enhanced banner
 echo.
 echo ===============================================================================
-echo                       ADB APK INSTALLER v4.0.0
-echo              "(Interactive Selection & Auto-Dependency)"
+echo                     ADB APK INSTALLER v4.5.2 "Odyssey"
+echo              "(Interactive Selection & Advanced Device Spoofing)"
 echo ===============================================================================
 echo.
 echo  Professional APK Installation Tool for Android Devices
-echo  Install APKs, XAPKs with User Profile or Magisk Spoofing
+echo  Install APKs, XAPKs with Advanced User Profile Management and Device Spoofing
+echo  Features: Custom Profile Naming, User Management Tools, Enhanced Clipboard Support
 echo.
 echo  APK Directory: "%APK_DIR%"
 echo  Script Path:   "%SCRIPT_PATH%"
@@ -37,7 +38,7 @@ if not exist "%APK_DIR%" (
 
 :: Check if Python script exists
 if not exist "%SCRIPT_PATH%" (
-    echo [ERROR] APK Installer script not found at "%SCRIPT_PATH%"
+    echo [ERROR] APK Installer v4.5.2 script not found at "%SCRIPT_PATH%"
     echo Please ensure apk_installer.py is in the same directory as this batch file.
     pause
     exit /b 1
@@ -79,8 +80,11 @@ echo.
 cd /D "%BATCH_DIR%"
 
 :: Run the Python script
-echo [INFO] Starting APK Installer v4.0.0...
-echo [INFO] The script will check for and offer to install missing dependencies.
+echo [INFO] Starting APK Installer v4.5.2 "Odyssey"...
+echo [INFO] The script will automatically check for and install missing dependencies:
+echo         - rich (enhanced console interface)
+echo         - pyaxmlparser (APK manifest parsing)
+echo         - questionary (interactive prompts)
 echo.
 
 "%PYTHON_EXE%" "%SCRIPT_PATH%"
@@ -90,19 +94,19 @@ set "EXIT_CODE=!errorlevel!"
 echo.
 if !EXIT_CODE! equ 0 (
     echo ===============================================================================
-    echo                        APK INSTALLER COMPLETED SUCCESSFULLY
+    echo                    APK INSTALLER v4.5.2 COMPLETED SUCCESSFULLY
     echo ===============================================================================
     echo.
 ) else if !EXIT_CODE! equ 1 (
     echo ===============================================================================
-    echo                       APK INSTALLER COMPLETED WITH ERRORS
+    echo                   APK INSTALLER v4.5.2 COMPLETED WITH ERRORS
     echo ===============================================================================
     echo.
     echo [WARNING] The process finished, but one or more errors occurred.
     echo [INFO] Please review the summary and error messages above for details.
 ) else (
      echo ===============================================================================
-    echo                  APK INSTALLER EXITED UNEXPECTEDLY (Code: !EXIT_CODE!)
+    echo              APK INSTALLER v4.5.2 EXITED UNEXPECTEDLY (Code: !EXIT_CODE!)
     echo ===============================================================================
     echo.
     echo [ERROR] The script terminated unexpectedly.
@@ -112,4 +116,4 @@ echo.
 echo Press any key to close this window...
 pause >nul
 
-endlocal
+endlocal 
