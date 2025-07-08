@@ -20,6 +20,13 @@
   </p>
 </div>
 
+## 📸 Live Demo
+
+<div align="center">
+  <img src="1.png" alt="ADB APK Installer & Spoofer v4.5.2 Interactive Interface Demo" width="800">
+  <p><em>Interactive device selection and installation interface with real-time status updates</em></p>
+</div>
+
 ## Overview
 
 This tool provides a professional suite for Android application installation and testing. It elevates the standard `adb install` workflow by integrating a rich, interactive interface with powerful, layered spoofing capabilities. Its core strength lies in its dual-pronged approach to creating unique, sandboxed environments:
