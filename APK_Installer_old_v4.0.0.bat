@@ -3,19 +3,20 @@ setlocal enabledelayedexpansion
 
 :: Get the directory of the batch file
 set "BATCH_DIR=%~dp0"
-set "SCRIPT_PATH=%BATCH_DIR%apk_installer.py"
+set "SCRIPT_PATH=%BATCH_DIR%APK_Installer_UV.py"
 set "APK_DIR=%BATCH_DIR%apks"
 set "CONFIG_FILE=%BATCH_DIR%config.ini"
 
-:: Display enhanced banner
+:: Display enhanced banner with UV support mentioned
 echo.
 echo ===============================================================================
 echo                       ADB APK INSTALLER v4.0.0
-echo              "(Interactive Selection & Auto-Dependency)"
+echo              "(Interactive Selection & Auto-Dependency with UV)"
 echo ===============================================================================
 echo.
 echo  Professional APK Installation Tool for Android Devices
 echo  Install APKs, XAPKs with User Profile or Magisk Spoofing
+echo  Enhanced with UV support - faster dependency management
 echo.
 echo  APK Directory: "%APK_DIR%"
 echo  Script Path:   "%SCRIPT_PATH%"
@@ -78,9 +79,30 @@ echo.
 :: Change to script directory for consistent relative paths
 cd /D "%BATCH_DIR%"
 
+:: Check if UV is available (but don't try to install it)
+echo [INFO] Checking for package managers...
+where uv >nul 2>&1
+if !errorlevel! equ 0 (
+    echo [SUCCESS] UV package manager detected - will be used for dependency management
+    set "USE_UV=1"
+) else (
+    echo [INFO] UV not found - will use pip for dependency management
+    set "USE_UV=0"
+)
+
+echo.
+
 :: Run the Python script
 echo [INFO] Starting APK Installer v4.0.0...
-echo [INFO] The script will check for and offer to install missing dependencies.
+if "!USE_UV!"=="1" (
+    echo [INFO] UV support enabled for enhanced dependency management
+) else (
+    echo [INFO] Using standard pip for dependency management
+)
+echo [INFO] The script will automatically check for and install missing dependencies:
+echo         - rich (enhanced console interface)
+echo         - pyaxmlparser (APK manifest parsing)  
+echo         - questionary (interactive prompts)
 echo.
 
 "%PYTHON_EXE%" "%SCRIPT_PATH%"
@@ -101,7 +123,7 @@ if !EXIT_CODE! equ 0 (
     echo [WARNING] The process finished, but one or more errors occurred.
     echo [INFO] Please review the summary and error messages above for details.
 ) else (
-     echo ===============================================================================
+    echo ===============================================================================
     echo                  APK INSTALLER EXITED UNEXPECTEDLY (Code: !EXIT_CODE!)
     echo ===============================================================================
     echo.

@@ -3886,10 +3886,10 @@ validate_root_access = true
                 "success",
             )
         except Exception as e:
-            self._log_message(
-                f"✗ Failed to create default config file '{config_file_str}': {e}",
-                "error",
+            self.errors.append(
+                f"Failed to create default config file '{config_file_str}': {e}"
             )
+            self._log_message(f"✗ {self.errors[-1]}", "error")
 
     def verify_adb(self):
         try:
@@ -6562,37 +6562,31 @@ validate_root_access = true
 
 
 def install_dependency(package_name, console_instance=None):
-    """Installs a single dependency using pip."""
+    """Installs a single dependency using uv or pip."""
+    import os
     msg = f"Attempting to install [cyan]{package_name}[/cyan]..."
     if console_instance: console_instance.print(msg, style="yellow")
     else: print(re.sub(r'\[/?\w+.*?\]', '', msg))
     try:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "--user", package_name])
+        use_uv = (os.environ.get('USE_UV') == '1')
+        installer = [sys.executable, "-m", "uv", "pip", "install", "--user"] if use_uv else [sys.executable, "-m", "pip", "install", "--user"]
+        subprocess.check_call(installer + [package_name])
         msg_ok = f"✓ Successfully installed [cyan]{package_name}[/cyan]."
         if console_instance: console_instance.print(msg_ok, style="green")
         else: print(re.sub(r'\[/?\w+.*?\]', '', msg_ok))
         return True
     except subprocess.CalledProcessError as e:
-        msg_fail = f"✗ Failed to install [cyan]{package_name}[/cyan]. Please install it manually: [bold]pip install {package_name}[/bold]. Error: {e}"
+        msg_fail = f"✗ Failed to install [cyan]{package_name}[/cyan]. Please install it manually: [bold]uv pip install {package_name}[/bold]. Error: {e}"
         if console_instance: console_instance.print(msg_fail, style="red")
         else: print(re.sub(r'\[/?\w+.*?\]', '', msg_fail))
         return False
 
 def check_and_install_dependencies():
-    """Checks for required libraries and prompts to install them if missing."""
+    """Checks for required libraries and installs them if missing (no prompts)."""
     missing = [pkg for pkg, available in [("rich", RICH_AVAILABLE), ("pyaxmlparser", PYAXMLPARSER_AVAILABLE), ("questionary", QUESTIONARY_AVAILABLE)] if not available]
     if not missing: return True
-
     console = Console(stderr=True) if RICH_AVAILABLE else None
-
-    if console:
-        console.print(Panel(Text.from_markup(f"This script requires missing package(s) for full functionality:\n[bold yellow]{', '.join(missing)}[/bold yellow]"), title="[yellow]Missing Dependencies[/yellow]"))
-        if not Confirm.ask("Attempt automatic installation now?", default=True, console=console):
-            console.print("Installation skipped. The script may not run correctly.", style="dim"); return False
-    else:
-        if input(f"Missing dependencies: {', '.join(missing)}. Install now? (y/n): ").lower() != 'y':
-            print("Installation skipped."); return False
-
+    # Remove all prompts, always install automatically
     all_installed = all(install_dependency(dep, console) for dep in missing)
     if all_installed:
         msg_restart = "\n[green]Dependencies installed.[/green] Please restart the script for changes to take effect."
@@ -6608,11 +6602,11 @@ def main():
     # Re-check availability after potential installation and restart prompt.
     # The script exits if installation happens, so this check is for when user skips install.
     if not RICH_AVAILABLE:
-        print("Rich library not found. UI will be basic. Install with: pip install rich")
+        print("Rich library not found. UI will be basic. Install with: uv pip install rich")
     if not PYAXMLPARSER_AVAILABLE:
-        print("Warning: pyaxmlparser not found. APK package name parsing might be limited. Install with: pip install pyaxmlparser")
+        print("Warning: pyaxmlparser not found. APK package name parsing might be limited. Install with: uv pip install pyaxmlparser")
     if not QUESTIONARY_AVAILABLE:
-        print("Warning: questionary not found. Interactive selection menus will not be available. Install with: pip install questionary")
+        print("Warning: questionary not found. Interactive selection menus will not be available. Install with: uv pip install questionary")
 
     installer_instance = InteractiveAPKInstaller()
     final_outcome_success = False
